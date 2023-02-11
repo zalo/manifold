@@ -79,6 +79,37 @@ MeshGL TetGL() {
   return tet;
 }
 
+MeshGL CubeGL() {
+  MeshGL cube;
+  cube.numProp = 6;
+  glm::mat3 t[3] = {
+      glm::mat3(1), {1, 0, 0, 0, 0, -1, 0, 1, 0}, {0, 1, 0, -1, 0, 0, 0, 0, 1}};
+  glm::vec3 n(0, 1, 0);
+  glm::mat4x3 p(1, 1, 1,    //
+                1, 1, -1,   //
+                -1, 1, -1,  //
+                -1, 1, 1);
+  for (const int dir : {0, 1, 2}) {
+    for (const float side : {1, -1}) {
+      const int start = cube.vertProperties.size();
+      cube.triVerts.push_back(start);
+      cube.triVerts.push_back(start + 1);
+      cube.triVerts.push_back(start + 2);
+      cube.triVerts.push_back(start);
+      cube.triVerts.push_back(start + 2);
+      cube.triVerts.push_back(start + 3);
+      const glm::vec3 norm = side * t[dir] * n;
+      for (const int i : {0, 1, 2, 3}) {
+        const glm::vec3 v = side * t[dir] * p[i];
+        const glm::vec3 ni = side * t[dir] * n;
+        for (const int j : {0, 1, 2}) cube.vertProperties.push_back(v[j]);
+        for (const int j : {0, 1, 2}) cube.vertProperties.push_back(ni[j]);
+      }
+    }
+  }
+  return Weld(cube);
+}
+
 MeshGL WithIndexColors(const Mesh& in) {
   MeshGL inGL(in);
   inGL.originalID = {Manifold::ReserveIDs(1)};
@@ -811,12 +842,10 @@ TEST(Boolean, MeshGLRoundTrip) {
 }
 
 TEST(Boolean, Normals) {
-  const MeshGL boxGL = WithNormals(Manifold::Cube({200, 200, 100}, true));
-  const Manifold box(boxGL);
+  const MeshGL cubeGL = CubeGL();
+  const Manifold cube(cubeGL);
   const MeshGL sphereGL = WithNormals(Manifold::Sphere(60));
   const Manifold sphere(sphereGL);
-
-  Manifold cube = box ^ box.Rotate(90) ^ box.Rotate(0, 90);
 
   Manifold result =
       cube - (sphere.Rotate(180) -
@@ -831,7 +860,7 @@ TEST(Boolean, Normals) {
     ExportMesh("normals.glb", result.GetMeshGL({3, 4, 5}), opt);
 #endif
 
-  RelatedGL(result, {boxGL, sphereGL}, true);
+  RelatedGL(result, {cubeGL, sphereGL}, true);
 }
 
 TEST(Boolean, Mirrored) {

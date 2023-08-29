@@ -871,10 +871,10 @@ class Monotones {
       EdgeItr westEdge = vert->edge;
       OVERLAP_ASSERT(type == Start || westEdge != activeEdges_.end(),
                      "No active pair!");
+      EdgeItr eastEdge = std::next(westEdge);
 
       switch (type) {
         case Merge: {
-          EdgeItr eastEdge = std::next(westEdge);
           if (eastEdge->next != activeEdges_.end())
             vert = SplitVerts(vert, eastEdge->next->south);
           OVERLAP_ASSERT(westEdge != activeEdges_.begin(),
@@ -882,10 +882,11 @@ class Monotones {
           std::prev(westEdge)->next = westEdge;  // mark merge
         }
         case End:
-          RemovePair(westEdge);
+          inactiveEdges_.splice(inactiveEdges_.end(), activeEdges_, westEdge,
+                                std::next(eastEdge));
         case Forward:
-          westEdge = std::prev(westEdge);
         case Backward:
+          if (type == Forward) westEdge = std::prev(westEdge);
           if (westEdge->next != activeEdges_.end()) {
             VertItr eastVert = SplitVerts(vert, westEdge->next->south);
             if (type == Backward) westEdge->south = eastVert;
@@ -897,24 +898,26 @@ class Monotones {
           // swapped and what was the next pair is now the previous pair and
           // begin and end are swapped.
           EdgeItr pos = westEdge->next;
-          EdgeItr eastEdge = std::next(westEdge);
 
           if (!westEdge->flipped) {
             std::swap(westEdge, eastEdge);
             pos = pos == activeEdges_.end() ? activeEdges_.begin()
                                             : std::next(pos);
           }
+
+          activeEdges_.splice(pos, inactiveEdges_, eastEdge);
+          activeEdges_.splice(eastEdge, inactiveEdges_, westEdge);
+          westEdge->forward ^= true;
+          eastEdge->forward ^= true;
           const bool isHole = westEdge->forward;
-          activeEdges_.splice(pos, inactiveEdges_, westEdge);
-          activeEdges_.splice(westEdge, inactiveEdges_, eastEdge);
 
           if (isHole) {
             EdgeItr westBefore = std::prev(eastEdge);
             VertItr split = westBefore->next != activeEdges_.end()
                                 ? westBefore->next->south
                             : westEdge->south->pos.y < eastEdge->south->pos.y
-                                ? westEdge->south
-                                : eastEdge->south;
+                                ? eastEdge->south
+                                : westEdge->south;
             VertItr eastVert = SplitVerts(vert, split);
             westEdge->next = activeEdges_.end();
             eastEdge->next = activeEdges_.end();
@@ -922,8 +925,8 @@ class Monotones {
             UpdateEdge(eastEdge, eastVert);
             UpdateEdge(westEdge, vert);
           } else {  // Start
+            eastEdge->south = vert;
             UpdateEdge(westEdge, vert);
-            UpdateEdge(eastEdge, vert);
           }
           break;
         }
@@ -941,16 +944,19 @@ class Monotones {
   }
 
 #ifdef MANIFOLD_DEBUG
+  void ListEdge(Edge edge) const {
+    std::cout << (edge.forward ? "Fwd" : "Bwd");
+    std::cout << ": S = " << edge.south->mesh_idx
+              << ", N = " << edge.North()->mesh_idx;
+    std::cout << (edge.next == activeEdges_.end() ? " none" : " next");
+    std::cout << (edge.eastCertain ? " certain" : " uncertain") << std::endl;
+    // if (&*(edge.vWest->eastEdge) != &edge)
+    //   std::cout << "west does not point back!" << std::endl;
+  }
+
   void ListActive() const {
     std::cout << "active edges:" << std::endl;
-    for (const Edge &edge : activeEdges_) {
-      std::cout << (edge.forward ? "Fwd" : "Bwd");
-      std::cout << ": S = " << edge.south->mesh_idx
-                << ", N = " << edge.North()->mesh_idx;
-      std::cout << (edge.eastCertain ? " certain" : " uncertain") << std::endl;
-      // if (&*(edge.vWest->eastEdge) != &edge)
-      //   std::cout << "west does not point back!" << std::endl;
-    }
+    for (const Edge &edge : activeEdges_) ListEdge(edge);
   }
 #endif
 };

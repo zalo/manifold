@@ -311,7 +311,7 @@ class Monotones {
  private:
   struct VertAdj;
   struct Edge;
-  enum VertType { Start, WestSide, EastSide, Merge, End, Skip };
+  enum VertType { Start, Backward, Forward, Merge, End, Skip };
 #if __has_include(<memory_resource>)
   typedef std::pmr::list<VertAdj>::iterator VertItr;
   typedef std::pmr::list<Edge>::iterator EdgeItr;
@@ -514,59 +514,71 @@ class Monotones {
    * determines the topology of the vertex relative to the sweep line.
    */
   VertType ProcessVert(VertItr vert) {
-    EdgeItr eastEdge = vert->right->edge;
-    EdgeItr westEdge = vert->left->edge;
     if (vert->right->Processed()) {
       if (vert->left->Processed()) {
-        if (std::next(eastEdge) == westEdge) {
-          // facing in (east and west reversed)
+        EdgeItr fwdEdge = vert->right->edge;
+        EdgeItr bwdEdge = vert->left->edge;
+        if (std::next(fwdEdge) == bwdEdge) {
+          // facing in (fwd and bwd reversed)
           PRINT("End");
-          eastEdge->south = vert;
-          westEdge->south = vert;
-          vert->edge = eastEdge;
+          fwdEdge->south = vert;
+          bwdEdge->south = vert;
+          vert->edge = fwdEdge;
           return End;
-        } else if (!eastEdge->eastCertain || !westEdge->eastCertain ||
-                   (westEdge != activeEdges_.end() &&
-                    std::next(westEdge) == eastEdge)) {
-          if (!eastEdge->eastCertain)
-            activeEdges_.splice(std::next(westEdge), activeEdges_, eastEdge);
-          if (!westEdge->eastCertain)
-            activeEdges_.splice(eastEdge, activeEdges_, westEdge);
+        } else if (!fwdEdge->eastCertain || !bwdEdge->eastCertain ||
+                   (bwdEdge != activeEdges_.end() &&
+                    std::next(bwdEdge) == fwdEdge)) {
+          if (!fwdEdge->eastCertain)
+            activeEdges_.splice(std::next(bwdEdge), activeEdges_, fwdEdge);
+          if (!bwdEdge->eastCertain)
+            activeEdges_.splice(fwdEdge, activeEdges_, bwdEdge);
           // facing out
           PRINT("Merge");
-          eastEdge->south = vert;
-          westEdge->south = vert;
-          // westEdge will be removed and eastEdge takes over.
-          vert->edge = westEdge;
+          fwdEdge->south = vert;
+          bwdEdge->south = vert;
+          // bwdEdge will be removed and fwdEdge takes over.
+          vert->edge = bwdEdge;
           return Merge;
         } else {  // not neighbors
           PRINT("Skip");
           return Skip;
         }
       } else {
+        EdgeItr bwdEdge = vert->right->edge;
+        if (bwdEdge->forward) {
+          // If vert is Start, vert->edge is the Western edge
+          bwdEdge = std::next(bwdEdge);
+        }
+        EdgeItr fwdEdge = std::next(bwdEdge);
         if (!vert->IsPast(vert->right, precision_) &&
-            !eastEdge->south->right->IsPast(vert, precision_) &&
-            vert->IsPast(eastEdge->south, precision_) &&
-            vert->pos.x > eastEdge->south->right->pos.x + precision_) {
-          PRINT("Skip WEST");
+            !fwdEdge->south->right->IsPast(vert, precision_) &&
+            vert->IsPast(fwdEdge->south, precision_) &&
+            vert->pos.x > fwdEdge->south->right->pos.x + precision_) {
+          PRINT("Skip backward edge");
           return Skip;
         }
-        UpdateEdge(eastEdge, vert);
-        PRINT("WestSide");
-        return WestSide;
+        UpdateEdge(bwdEdge, vert);
+        PRINT("Backward");
+        return Backward;
       }
     } else {
       if (vert->left->Processed()) {
+        EdgeItr fwdEdge = vert->left->edge;
+        if (!fwdEdge->forward) {
+          // If vert is Start, vert->edge is the Western edge
+          fwdEdge = std::next(fwdEdge);
+        }
+        EdgeItr bwdEdge = std::prev(fwdEdge);
         if (!vert->IsPast(vert->left, precision_) &&
-            !westEdge->south->left->IsPast(vert, precision_) &&
-            vert->IsPast(westEdge->south, precision_) &&
-            vert->pos.x < westEdge->south->left->pos.x - precision_) {
-          PRINT("Skip EAST");
+            !bwdEdge->south->left->IsPast(vert, precision_) &&
+            vert->IsPast(bwdEdge->south, precision_) &&
+            vert->pos.x < bwdEdge->south->left->pos.x - precision_) {
+          PRINT("Skip forward edge");
           return Skip;
         }
-        UpdateEdge(westEdge, vert);
-        PRINT("EastSide");
-        return EastSide;
+        UpdateEdge(fwdEdge, vert);
+        PRINT("Forward");
+        return Forward;
       } else {
         PRINT("Start");
         return Start;
@@ -581,9 +593,10 @@ class Monotones {
    */
   void RemovePair(EdgeItr westEdge) {
     EdgeItr eastEdge = std::next(westEdge);
-    westEdge->next = eastEdge->next = std::next(eastEdge);
+    EdgeItr nextEast = std::next(eastEdge);
+    westEdge->next = eastEdge->next = nextEast;
     inactiveEdges_.splice(inactiveEdges_.end(), activeEdges_, westEdge,
-                          eastEdge);
+                          nextEast);
   }
 
   VertType PlaceStart(VertItr vert) {
@@ -616,9 +629,10 @@ class Monotones {
     }
 
     const EdgeItr noEdge = activeEdges_.end();
-    const EdgeItr newEastEdge =
-        activeEdges_.insert(eastEdge, {vert, noEdge, noEdge, !isHole, false,
-                                       eastEdge->EastOf(vert, precision_) > 0});
+    const EdgeItr newEastEdge = activeEdges_.insert(
+        eastEdge, {vert, noEdge, noEdge, !isHole, false,
+                   eastEdge == activeEdges_.end() ||
+                       eastEdge->EastOf(vert, precision_) > 0});
     const EdgeItr newWestEdge = activeEdges_.insert(
         newEastEdge, {vert, noEdge, noEdge, isHole, false, holeCertain});
     UpdateEdge(newEastEdge, vert);
@@ -726,9 +740,9 @@ class Monotones {
         ++insertAt;
       }
 
-      PRINT("mesh_idx = " << vert->mesh_idx);
-
       if (vert->Processed()) continue;
+
+      PRINT("mesh_idx = " << vert->mesh_idx);
 
       OVERLAP_ASSERT(
           skipped.empty() || !vert->IsPast(skipped.back(), precision_),
@@ -775,10 +789,10 @@ class Monotones {
         monotones_.splice(insertAt, monotones_, vert);
 
       switch (type) {
-        case WestSide:
+        case Backward:
           nextAttached.push(vert->left);
           break;
-        case EastSide:
+        case Forward:
           nextAttached.push(vert->right);
           break;
         case Start:
@@ -847,9 +861,9 @@ class Monotones {
     while (vert != monotones_.begin()) {
       --vert;
 
-      PRINT("mesh_idx = " << vert->mesh_idx);
-
       if (vert->Processed()) continue;
+
+      PRINT("mesh_idx = " << vert->mesh_idx);
 
       VertType type = ProcessVert(vert);
       OVERLAP_ASSERT(type != Skip, "Skip should not happen on reverse sweep!");
@@ -869,12 +883,12 @@ class Monotones {
         }
         case End:
           RemovePair(westEdge);
-        case EastSide:
+        case Forward:
           westEdge = std::prev(westEdge);
-        case WestSide:
+        case Backward:
           if (westEdge->next != activeEdges_.end()) {
             VertItr eastVert = SplitVerts(vert, westEdge->next->south);
-            if (type == WestSide) westEdge->south = eastVert;
+            if (type == Backward) westEdge->south = eastVert;
             westEdge->next = activeEdges_.end();  // unmark merge
           }
           break;

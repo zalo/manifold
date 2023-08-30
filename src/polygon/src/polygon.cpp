@@ -516,28 +516,28 @@ class Monotones {
   VertType ProcessVert(VertItr vert) {
     if (vert->right->Processed()) {
       if (vert->left->Processed()) {
-        EdgeItr fwdEdge = vert->right->edge;
-        EdgeItr bwdEdge = vert->left->edge;
-        if (std::next(fwdEdge) == bwdEdge) {
+        EdgeItr bwdEdge = vert->right->edge;
+        EdgeItr fwdEdge = vert->left->edge;
+        if (std::next(bwdEdge) == fwdEdge) {
           // facing in (fwd and bwd reversed)
           PRINT("End");
-          fwdEdge->south = vert;
           bwdEdge->south = vert;
-          vert->edge = fwdEdge;
+          fwdEdge->south = vert;
+          vert->edge = bwdEdge;
           return End;
-        } else if (!fwdEdge->eastCertain || !bwdEdge->eastCertain ||
-                   (bwdEdge != activeEdges_.end() &&
-                    std::next(bwdEdge) == fwdEdge)) {
-          if (!fwdEdge->eastCertain)
-            activeEdges_.splice(std::next(bwdEdge), activeEdges_, fwdEdge);
+        } else if (!bwdEdge->eastCertain || !fwdEdge->eastCertain ||
+                   (fwdEdge != activeEdges_.end() &&
+                    std::next(fwdEdge) == bwdEdge)) {
           if (!bwdEdge->eastCertain)
-            activeEdges_.splice(fwdEdge, activeEdges_, bwdEdge);
+            activeEdges_.splice(std::next(fwdEdge), activeEdges_, bwdEdge);
+          if (!fwdEdge->eastCertain)
+            activeEdges_.splice(bwdEdge, activeEdges_, fwdEdge);
           // facing out
           PRINT("Merge");
-          fwdEdge->south = vert;
           bwdEdge->south = vert;
+          fwdEdge->south = vert;
           // bwdEdge will be removed and fwdEdge takes over.
-          vert->edge = bwdEdge;
+          vert->edge = fwdEdge;
           return Merge;
         } else {  // not neighbors
           PRINT("Skip");
@@ -950,8 +950,8 @@ class Monotones {
               << ", N = " << edge.North()->mesh_idx;
     std::cout << (edge.next == activeEdges_.end() ? " none" : " next");
     std::cout << (edge.eastCertain ? " certain" : " uncertain") << std::endl;
-    // if (&*(edge.vWest->eastEdge) != &edge)
-    //   std::cout << "west does not point back!" << std::endl;
+    if (edge.south->edge->south != edge.south)
+      std::cout << "edge does not point back!" << std::endl;
   }
 
   void ListActive() const {

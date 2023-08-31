@@ -526,6 +526,8 @@ class Monotones {
                    (fwdEdge != activeEdges_.end() &&
                     std::next(fwdEdge) == bwdEdge)) {
           if (!bwdEdge->eastCertain)
+            // TODO: splice from bwdEdge to bwdEdge->linked, but need to
+            // determine correct direction.
             activeEdges_.splice(std::next(fwdEdge), activeEdges_, bwdEdge);
           if (!fwdEdge->eastCertain)
             activeEdges_.splice(bwdEdge, activeEdges_, fwdEdge);
@@ -543,10 +545,6 @@ class Monotones {
         }
       } else {
         EdgeItr bwdEdge = vert->right->edgeL;
-        if (bwdEdge->forward) {
-          // If vert is Start, vert->edge is the Western edge
-          bwdEdge = std::next(bwdEdge);
-        }
         EdgeItr fwdEdge = std::next(bwdEdge);
         if (!vert->IsPast(vert->right, precision_) &&
             !fwdEdge->south->right->IsPast(vert, precision_) &&
@@ -562,10 +560,6 @@ class Monotones {
     } else {
       if (vert->left->Processed()) {
         EdgeItr fwdEdge = vert->left->edgeR;
-        if (!fwdEdge->forward) {
-          // If vert is Start, vert->edge is the Western edge
-          fwdEdge = std::next(fwdEdge);
-        }
         EdgeItr bwdEdge = std::prev(fwdEdge);
         if (!vert->IsPast(vert->left, precision_) &&
             !bwdEdge->south->left->IsPast(vert, precision_) &&
@@ -610,11 +604,13 @@ class Monotones {
         } else {  // invalid
           if (!holeCertain) {
             isHole = !isHole;
+            break;
           } else {  // shift to a valid position
             if (eastEdge->EastOf(vert, precision_) <= 0) {
               ++eastEdge;
               break;
-            } else if (std::prev(eastEdge)->EastOf(vert, precision_) >= 0) {
+            } else if (eastEdge != activeEdges_.begin() &&
+                       std::prev(eastEdge)->EastOf(vert, precision_) >= 0) {
               --eastEdge;
               break;
             } else {
@@ -624,6 +620,19 @@ class Monotones {
         }
       }
       ++eastEdge;
+    }
+
+    if (eastEdge == activeEdges_.end() && isHole) {
+      if (!holeCertain) {
+        isHole = false;
+      } else {  // shift to a valid position
+        if (eastEdge != activeEdges_.begin() &&
+            std::prev(eastEdge)->EastOf(vert, precision_) >= 0) {
+          --eastEdge;
+        } else {
+          return Skip;
+        }
+      }
     }
 
     const EdgeItr noEdge = activeEdges_.end();

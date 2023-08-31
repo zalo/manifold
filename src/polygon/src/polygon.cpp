@@ -895,39 +895,38 @@ class Monotones {
         // begin and end are swapped.
         EdgeItr westEdge = vert->edgeL;
         EdgeItr eastEdge = vert->edgeR;
-        EdgeItr pos = westEdge->next;
+        EdgeItr eastOf = westEdge->next;
 
         if (std::next(eastEdge) == westEdge) std::swap(eastEdge, westEdge);
 
         if (!westEdge->flipped) {
           std::swap(westEdge, eastEdge);
-          pos =
-              pos == activeEdges_.end() ? activeEdges_.begin() : std::next(pos);
+          eastOf = eastOf == activeEdges_.end() ? activeEdges_.begin()
+                                                : std::next(eastOf);
         }
 
-        activeEdges_.splice(pos, inactiveEdges_, eastEdge);
+        activeEdges_.splice(eastOf, inactiveEdges_, eastEdge);
         activeEdges_.splice(eastEdge, inactiveEdges_, westEdge);
         westEdge->forward ^= true;
         eastEdge->forward ^= true;
         const bool isHole = westEdge->forward;
 
         if (isHole) {
-          EdgeItr westBefore = std::prev(eastEdge);
-          VertItr split = westBefore->next != activeEdges_.end()
-                              ? westBefore->next->south
-                          : westEdge->south->pos.y < eastEdge->south->pos.y
-                              ? eastEdge->south
-                              : westEdge->south;
+          EdgeItr westOf = std::prev(westEdge);
+          VertItr split =
+              westOf->next != activeEdges_.end() ? westOf->next->south
+              : westOf->south->pos.y < eastOf->south->pos.y ? eastOf->south
+                                                            : westOf->south;
           VertItr eastVert = SplitVerts(vert, split);
-          westEdge->next = activeEdges_.end();
-          eastEdge->next = activeEdges_.end();
-          westBefore->next = activeEdges_.end();
+          westOf->next = activeEdges_.end();
           UpdateEdge(eastEdge, eastVert);
           UpdateEdge(westEdge, vert);
         } else {  // Start
           vert->edgeL = westEdge;
           vert->edgeR = eastEdge;
         }
+        westEdge->next = activeEdges_.end();
+        eastEdge->next = activeEdges_.end();
       }
 
       vert->SetProcessed(true);

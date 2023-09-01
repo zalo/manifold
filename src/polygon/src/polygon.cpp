@@ -381,7 +381,7 @@ class Monotones {
   struct Edge {
     VertItr south;         //, chain;
     EdgeItr linked, next;  //, bottomEast;
-    bool forward, flipped, eastCertain;
+    bool forward, linked2east, flipped, eastCertain;
     float minDegenerateY = 0;
 
     VertItr North() const { return forward ? south->right : south->left; }
@@ -512,36 +512,36 @@ class Monotones {
   VertType ProcessVert(VertItr vert) {
     if (vert->right->Processed()) {
       if (vert->left->Processed()) {
-        EdgeItr bwdEdge = vert->right->edgeL;
-        EdgeItr fwdEdge = vert->left->edgeR;
-        if (std::next(bwdEdge) == fwdEdge) {
-          // facing in (fwd and bwd reversed)
-          PRINT("End");
-          bwdEdge->south = vert;
-          fwdEdge->south = vert;
-          vert->edgeR = bwdEdge;
-          vert->edgeL = fwdEdge;
-          return End;
-        } else if (!bwdEdge->eastCertain || !fwdEdge->eastCertain ||
-                   (fwdEdge != activeEdges_.end() &&
-                    std::next(fwdEdge) == bwdEdge)) {
-          if (!bwdEdge->eastCertain)
-            // TODO: splice from bwdEdge to bwdEdge->linked, but need to
-            // determine correct direction.
-            activeEdges_.splice(std::next(fwdEdge), activeEdges_, bwdEdge);
-          if (!fwdEdge->eastCertain)
-            activeEdges_.splice(bwdEdge, activeEdges_, fwdEdge);
-          // facing out
-          PRINT("Merge");
-          bwdEdge->south = vert;
-          fwdEdge->south = vert;
-          // bwdEdge will be removed and fwdEdge takes over.
-          vert->edgeR = bwdEdge;
-          vert->edgeL = fwdEdge;
-          return Merge;
-        } else {  // not neighbors
+        EdgeItr edgeR = vert->right->edgeL;
+        EdgeItr edgeL = vert->left->edgeR;
+        // if (CCW(vert->pos, vert->right->pos, vert->left->pos, precision_) ==
+        //     0) {
+        //   if (edgeL->linked2east && !edgeR->linked2east) {
+        //     activeEdges_.splice(edgeL, activeEdges_, edgeR->linked,
+        //                         std::next(edgeR));
+        //   } else if (!edgeL->linked2east && edgeR->linked2east) {
+        //     activeEdges_.splice(edgeR, activeEdges_, edgeL->linked,
+        //                         std::next(edgeL));
+        //   }
+        // }
+
+        if (std::next(edgeR) != edgeL && std::next(edgeL) != edgeR) {
           PRINT("Skip");
           return Skip;
+        }
+
+        edgeR->south = vert;
+        edgeL->south = vert;
+        vert->edgeR = edgeR;
+        vert->edgeL = edgeL;
+        LinkEdges(edgeL->linked, edgeR->linked);
+
+        if (std::next(edgeR) == edgeL) {  // facing in
+          PRINT("End");
+          return End;
+        } else {  // facing out
+          PRINT("Merge");
+          return Merge;
         }
       } else {
         EdgeItr bwdEdge = vert->right->edgeL;
@@ -592,42 +592,26 @@ class Monotones {
   }
 
   VertType PlaceStart(VertItr vert) {
-    bool isHole = CCW(vert->left->pos, vert->pos, vert->right->pos, 0) < 0;
-    const bool holeCertain =
-        CCW(vert->left->pos, vert->pos, vert->right->pos, precision_) != 0;
-
     EdgeItr eastEdge = activeEdges_.begin();
-    while (eastEdge != activeEdges_.end()) {
-      if (eastEdge->EastOf(vert, 0) > 0) {
-        if (isHole == eastEdge->forward) {  // valid
-          break;
-        } else {  // invalid
-          if (!holeCertain) {
-            isHole = !isHole;
-            break;
-          } else {  // shift to a valid position
-            if (eastEdge->EastOf(vert, precision_) <= 0) {
-              ++eastEdge;
-              break;
-            } else if (eastEdge != activeEdges_.begin() &&
-                       std::prev(eastEdge)->EastOf(vert, precision_) >= 0) {
-              --eastEdge;
-              break;
-            } else {
-              return Skip;
-            }
-          }
-        }
-      }
+    while (eastEdge != activeEdges_.end() && eastEdge->EastOf(vert, 0) <= 0) {
       ++eastEdge;
     }
 
-    if (eastEdge == activeEdges_.end() && isHole) {
+    bool isHole = CCW(vert->left->pos, vert->pos, vert->right->pos, 0) < 0;
+    const bool holeCertain =
+        CCW(vert->left->pos, vert->pos, vert->right->pos, precision_) != 0;
+    const bool shouldBeStart =
+        eastEdge == activeEdges_.end() || !eastEdge->forward;
+
+    if (isHole == shouldBeStart) {  // invalid
       if (!holeCertain) {
-        isHole = false;
+        isHole = !isHole;
       } else {  // shift to a valid position
-        if (eastEdge != activeEdges_.begin() &&
-            std::prev(eastEdge)->EastOf(vert, precision_) >= 0) {
+        if (eastEdge != activeEdges_.end() &&
+            eastEdge->EastOf(vert, precision_) <= 0) {
+          ++eastEdge;
+        } else if (eastEdge != activeEdges_.begin() &&
+                   std::prev(eastEdge)->EastOf(vert, precision_) >= 0) {
           --eastEdge;
         } else {
           return Skip;
@@ -637,11 +621,11 @@ class Monotones {
 
     const EdgeItr noEdge = activeEdges_.end();
     const EdgeItr newEastEdge = activeEdges_.insert(
-        eastEdge, {vert, noEdge, noEdge, !isHole, false,
+        eastEdge, {vert, noEdge, noEdge, !isHole, false, false,
                    eastEdge == activeEdges_.end() ||
                        eastEdge->EastOf(vert, precision_) > 0});
     const EdgeItr newWestEdge = activeEdges_.insert(
-        newEastEdge, {vert, noEdge, noEdge, isHole, false, holeCertain});
+        newEastEdge, {vert, noEdge, noEdge, isHole, true, false, holeCertain});
     vert->edgeR = isHole ? newWestEdge : newEastEdge;
     vert->edgeL = isHole ? newEastEdge : newWestEdge;
     LinkEdges(newEastEdge, newWestEdge);

@@ -512,8 +512,8 @@ class Monotones {
   VertType ProcessVert(VertItr vert) {
     if (vert->right->Processed()) {
       if (vert->left->Processed()) {
-        EdgeItr edgeR = vert->right->edgeL;
-        EdgeItr edgeL = vert->left->edgeR;
+        const EdgeItr edgeR = vert->right->edgeL;
+        const EdgeItr edgeL = vert->left->edgeR;
         // if (CCW(vert->pos, vert->right->pos, vert->left->pos, precision_) ==
         //     0) {
         //   if (edgeL->linked2east && !edgeR->linked2east) {
@@ -544,8 +544,8 @@ class Monotones {
           return Merge;
         }
       } else {
-        EdgeItr bwdEdge = vert->right->edgeL;
-        EdgeItr fwdEdge = std::next(bwdEdge);
+        const EdgeItr bwdEdge = vert->right->edgeL;
+        const EdgeItr fwdEdge = std::next(bwdEdge);
         if (!vert->IsPast(vert->right, precision_) &&
             !fwdEdge->south->right->IsPast(vert, precision_) &&
             vert->IsPast(fwdEdge->south, precision_) &&
@@ -559,8 +559,8 @@ class Monotones {
       }
     } else {
       if (vert->left->Processed()) {
-        EdgeItr fwdEdge = vert->left->edgeR;
-        EdgeItr bwdEdge = std::prev(fwdEdge);
+        const EdgeItr fwdEdge = vert->left->edgeR;
+        const EdgeItr bwdEdge = std::prev(fwdEdge);
         if (!vert->IsPast(vert->left, precision_) &&
             !bwdEdge->south->left->IsPast(vert, precision_) &&
             vert->IsPast(bwdEdge->south, precision_) &&
@@ -645,30 +645,29 @@ class Monotones {
    * certainties conflict, indicating this vertex is not yet geometrically valid
    * and must be skipped.
    */
-  // bool ShiftEast(const EdgeItr inputEdge, float precision) {
-  //   if (inputEdge->eastCertain) return false;
+  bool ShiftEast(const EdgeItr inputEdge, float precision) {
+    if (inputEdge->eastCertain) return false;
 
-  //   const VertItr vert = inputEdge->south;
-  //   EdgeItr eastEdge = std::next(inputEdge);
-  //   bool swap = false;
-  //   while (eastEdge != activeEdges_.end()) {
-  //     const bool EastOf = eastEdge->EastOf(vert, precision) > 0;
-  //     if (EastOf) {
-  //       const EdgeItr linked = inputEdge->linked;
-  //       if (swap) {
-  //       } else {
-  //         if (inputEdge->bottomEast->south->pos.y)
-  //           activeEdges_.splice(eastEdge, activeEdges_, inputEdge);
-  //         inputEdge->eastCertain = eastEdge->EastOf(vert, precision) > 0;
-  //       }
-  //       break;
-  //     }
-  //     ++eastEdge;
-  //     swap = !swap;
-  //   }
+    const VertItr vert = inputEdge->North();
+    EdgeItr eastEdge = std::next(inputEdge);
+    bool swap = false;
+    bool past = false;
+    while (eastEdge != activeEdges_.end() &&
+           eastEdge->EastOf(vert, precision) <= 0) {
+      if (eastEdge == inputEdge->linked) {
+        swap = !swap;
+        past = true;
+      }
+      ++eastEdge;
+      swap = !swap;
+    }
 
-  //   return false;
-  // }
+    if (swap) {
+    } else {
+    }
+
+    return false;
+  }
 
   /**
    * Identical to the above function, but swapped to search westward instead.

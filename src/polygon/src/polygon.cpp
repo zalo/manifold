@@ -670,11 +670,11 @@ class Monotones {
       eastEdge = inputEdge;
       while (eastEdge != activeEdges_.begin()) {
         --eastEdge;
-        swap = !swap;
-        if (eastEdge->EastOf(vert, 0) < 0) {
+        if (eastEdge->EastOf(vert, 0) <= 0) {
           ++eastEdge;
           break;
         }
+        swap = !swap;
         if (eastEdge == inputEdge->linked) {
           swap = !swap;
           pastLinked = true;
@@ -808,6 +808,10 @@ class Monotones {
 
       if (type != Skip && !vert->right->Processed()) {
         if (PlaceUncertain(vert->edgeR)) {
+          if (type == Start) {
+            activeEdges_.erase(vert->edgeL);
+            activeEdges_.erase(vert->edgeR);
+          }
           type = Skip;
         } else {
           UpdateCertainty(vert->edgeR);
@@ -815,6 +819,10 @@ class Monotones {
       }
       if (type != Skip && !vert->left->Processed()) {
         if (PlaceUncertain(vert->edgeL)) {
+          if (type == Start) {
+            activeEdges_.erase(vert->edgeL);
+            activeEdges_.erase(vert->edgeR);
+          }
           type = Skip;
         } else {
           UpdateCertainty(vert->edgeL);
@@ -1004,8 +1012,13 @@ class Monotones {
 
   void ListActive() {
     std::cout << "active edges:" << std::endl;
-    for (auto edge = activeEdges_.begin(); edge != activeEdges_.end(); ++edge)
+    bool forward = false;
+    for (auto edge = activeEdges_.begin(); edge != activeEdges_.end(); ++edge) {
       ListEdge(edge);
+      ASSERT(edge->forward == forward, logicErr,
+             "Active edges are not sanely ordered!");
+      forward ^= true;
+    }
   }
 #endif
 };

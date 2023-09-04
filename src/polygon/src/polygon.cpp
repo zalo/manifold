@@ -652,26 +652,25 @@ class Monotones {
     bool pastLinked = !inputEdge->linked2east;
 
     // Shift Eastwards
-    if (!inputEdge->eastCertain) {
-      while (eastEdge != activeEdges_.end() && eastEdge->EastOf(vert, 0) < 0) {
-        if (eastEdge == inputEdge->linked) {
-          swap = !swap;
-          pastLinked = true;
-        }
-        ++eastEdge;
+    while (eastEdge != activeEdges_.end() &&
+           !std::prev(eastEdge)->eastCertain && eastEdge->EastOf(vert, 0) < 0) {
+      if (eastEdge == inputEdge->linked) {
         swap = !swap;
+        pastLinked = true;
       }
+      ++eastEdge;
+      swap = !swap;
     }
 
     // Shift Westwards
-    if (eastEdge == std::next(inputEdge) && inputEdge != activeEdges_.begin() &&
-        !std::prev(inputEdge)->eastCertain) {
+    if (eastEdge == std::next(inputEdge)) {
       pastLinked = inputEdge->linked2east;
       eastEdge = inputEdge;
       while (eastEdge != activeEdges_.begin()) {
         --eastEdge;
-        if (eastEdge->EastOf(vert, 0) <= 0) {
+        if (eastEdge->eastCertain || eastEdge->EastOf(vert, 0) <= 0) {
           ++eastEdge;
+          if (eastEdge == inputEdge->linked) pastLinked = false;
           break;
         }
         swap = !swap;
@@ -682,7 +681,8 @@ class Monotones {
       }
     }
 
-    if (eastEdge == std::next(inputEdge)) {  // has not moved
+    if (eastEdge == inputEdge ||
+        eastEdge == std::next(inputEdge)) {  // has not moved
       return false;
     }
 

@@ -645,45 +645,107 @@ class Monotones {
    * certainties conflict, indicating this vertex is not yet geometrically valid
    * and must be skipped.
    */
-  bool ShiftEast(const EdgeItr inputEdge, float precision) {
-    if (inputEdge->eastCertain) return false;
-
+  bool PlaceUncertain(const EdgeItr inputEdge) {
     const VertItr vert = inputEdge->North();
     EdgeItr eastEdge = std::next(inputEdge);
     bool swap = false;
-    bool past = false;
-    while (eastEdge != activeEdges_.end() &&
-           eastEdge->EastOf(vert, precision) <= 0) {
-      if (eastEdge == inputEdge->linked) {
+    bool pastLinked = !inputEdge->linked2east;
+
+    // Shift Eastwards
+    if (!inputEdge->eastCertain) {
+      while (eastEdge != activeEdges_.end() && eastEdge->EastOf(vert, 0) < 0) {
+        if (eastEdge == inputEdge->linked) {
+          swap = !swap;
+          pastLinked = true;
+        }
+        ++eastEdge;
         swap = !swap;
-        past = true;
       }
-      ++eastEdge;
-      swap = !swap;
     }
 
-    if (swap) {
+    // Shift Westwards
+    if (eastEdge == std::next(inputEdge) && inputEdge != activeEdges_.begin() &&
+        !std::prev(inputEdge)->eastCertain) {
+      pastLinked = inputEdge->linked2east;
+      eastEdge = inputEdge;
+      while (eastEdge != activeEdges_.begin()) {
+        --eastEdge;
+        swap = !swap;
+        if (eastEdge->EastOf(vert, 0) < 0) {
+          ++eastEdge;
+          break;
+        }
+        if (eastEdge == inputEdge->linked) {
+          swap = !swap;
+          pastLinked = true;
+        }
+      }
+    }
+
+    if (eastEdge == std::next(inputEdge)) {  // has not moved
+      return false;
+    }
+
+    const bool linkedCertain = LinkedCertain(inputEdge);
+
+    if (linkedCertain) {
+      if (swap) {
+        return true;
+      } else {
+        activeEdges_.splice(eastEdge, activeEdges_, inputEdge);
+      }
     } else {
+      if (!pastLinked) return true;
+      EdgeItr westEdge = inputEdge->linked2east ? inputEdge : inputEdge->linked;
+      const EdgeItr afterEdge =
+          std::next(inputEdge->linked2east ? inputEdge->linked : inputEdge);
+      if (swap) {
+        EdgeItr next = std::next(westEdge);
+        while (westEdge != afterEdge) {
+          westEdge->linked2east ^= true;
+          westEdge->flipped ^= true;
+          activeEdges_.splice(eastEdge, activeEdges_, westEdge);
+          eastEdge = westEdge;
+          westEdge = next++;
+        }
+      } else {
+        activeEdges_.splice(eastEdge, activeEdges_, westEdge, afterEdge);
+      }
     }
 
     return false;
   }
 
-  /**
-   * Identical to the above function, but swapped to search westward instead.
-   */
-  // bool ShiftWest(const EdgeItr inputEdge, float precision) {
-  //   if (inputEdge == activeEdges_.begin() ||
-  //   std::prev(inputEdge)->eastCertain)
-  //     return false;
+  bool LinkedCertain(const EdgeItr edge) {
+    bool certain = false;
+    EdgeItr westEdge = edge->linked2east ? edge : edge->linked;
+    const EdgeItr eastEdge = edge->linked2east ? edge->linked : edge;
+    while (westEdge != eastEdge) {
+      if (westEdge->eastCertain) {
+        certain = true;
+        break;
+      }
+      ASSERT(westEdge != activeEdges_.end(), logicErr,
+             "Did not find linked edge!");
+      ++westEdge;
+    }
+    return certain;
+  }
 
-  //   EdgeItr westEdge = inputEdge;
-  //   while (westEdge != activeEdges_.begin()) {
-  //     --westEdge;
-  //   }
-
-  //   return false;
-  // }
+  void UpdateCertainty(const EdgeItr edge) {
+    const VertItr vert = edge->North();
+    if (!edge->eastCertain) {
+      const EdgeItr eastEdge = std::next(edge);
+      edge->eastCertain = eastEdge == activeEdges_.end() ||
+                          eastEdge->EastOf(vert, precision_) > 0;
+    }
+    if (edge != activeEdges_.begin()) {
+      const EdgeItr westEdge = std::prev(edge);
+      if (!westEdge->eastCertain) {
+        westEdge->eastCertain = westEdge->EastOf(vert, precision_) > 0;
+      }
+    }
+  }
 
   /**
    * This function sweeps forward (South to North) keeping track of the
@@ -744,20 +806,20 @@ class Monotones {
         type = PlaceStart(vert);
       }
 
-      // if (type != Skip && ShiftEast(vert->edge, 0) &&
-      //     ShiftEast(vert->edge, precision_))
-      //   type = Skip;
-      // if (type != Skip && ShiftWest(vert->edge, 0) &&
-      //     ShiftWest(vert->edge, precision_))
-      //   type = Skip;
-      // if (type == Start) {
-      //   if (ShiftEast(vert->edge->linked, 0) &&
-      //       ShiftEast(vert->edge->linked, precision_))
-      //     type = Skip;
-      //   if (type != Skip && ShiftWest(vert->edge->linked, 0) &&
-      //       ShiftWest(vert->edge->linked, precision_))
-      //     type = Skip;
-      // }
+      if (type != Skip && !vert->right->Processed()) {
+        if (PlaceUncertain(vert->edgeR)) {
+          type = Skip;
+        } else {
+          UpdateCertainty(vert->edgeR);
+        }
+      }
+      if (type != Skip && !vert->left->Processed()) {
+        if (PlaceUncertain(vert->edgeL)) {
+          type = Skip;
+        } else {
+          UpdateCertainty(vert->edgeL);
+        }
+      }
 
       if (type == Skip) {
         OVERLAP_ASSERT(std::next(insertAt) != monotones_.end(),

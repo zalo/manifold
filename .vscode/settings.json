@@ -120,7 +120,7 @@
     "-DMANIFOLD_USE_CUDA=OFF",
     "-DMANIFOLD_PAR=TBB",
     "-DCODE_COVERAGE=OFF",
-    "-DCMAKE_CXX_FLAGS=''" //'-fsanitize=address,undefined'"
+    "-DCMAKE_CXX_FLAGS='-fsanitize=address,undefined'" //''" //
   ],
   "search.exclude": {
     "**/third_party/*": true,

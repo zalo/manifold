@@ -387,14 +387,7 @@ class Monotones {
     VertItr North() const { return forward ? south->right : south->left; }
 
     int EastOf(VertItr vert, float precision) const {
-      const VertItr north = North();
-      if (south->pos.x - precision > vert->pos.x &&
-          north->pos.x - precision > vert->pos.x)
-        return 1;
-      if (south->pos.x + precision < vert->pos.x &&
-          north->pos.x + precision < vert->pos.x)
-        return -1;
-      return CCW(south->pos, north->pos, vert->pos, precision);
+      return CCW(south->pos, North()->pos, vert->pos, precision);
     }
   };
 
@@ -620,6 +613,10 @@ class Monotones {
     }
 
     const EdgeItr noEdge = activeEdges_.end();
+    // if (eastEdge != activeEdges_.begin()) {
+    //   const EdgeItr westEdge = std::prev(eastEdge);
+    //   westEdge->eastCertain = false;
+    // }
     const EdgeItr newEastEdge = activeEdges_.insert(
         eastEdge, {vert, noEdge, noEdge, !isHole, false, false,
                    eastEdge == activeEdges_.end() ||
@@ -709,6 +706,10 @@ class Monotones {
           westEdge = next++;
         }
       } else {
+        EdgeItr test = westEdge;
+        while (test != afterEdge) {
+          ASSERT(eastEdge != test++, logicErr, "WTF");
+        }
         activeEdges_.splice(eastEdge, activeEdges_, westEdge, afterEdge);
       }
     }

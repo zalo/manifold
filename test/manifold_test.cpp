@@ -765,13 +765,40 @@ TEST(Manifold, SweptCube) {
       {0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1},  // corners
       {1, 1, 0}, {0, 1, 1}, {1, 0, 1}, {1, 1, 1},  // corners
   };
+  // Test Translation Variant
   auto sweptCube = Manifold::Hull(cubePts).Sweep({1, 0, 0});
+  EXPECT_FLOAT_EQ(sweptCube.GetProperties().volume, 2);
+
+  // Test Transformation Variant
+  auto sweepMatrix = glm::mat4x3(0.0);
+  sweepMatrix[0][0] = 1.0;
+  sweepMatrix[1][1] = 1.0;
+  sweepMatrix[2][2] = 1.0;
+  //sweepMatrix[0][3] = 1.0;
+  //sweepMatrix[1][3] = 0.0;
+  //sweepMatrix[2][3] = 0.0;
+  sweepMatrix[0][3] = 1.0;
+  sweepMatrix[1][3] = 0.0;
+  sweepMatrix[2][3] = 0.0;
+  sweptCube = Manifold::Hull(cubePts).Sweep(sweepMatrix);
   EXPECT_FLOAT_EQ(sweptCube.GetProperties().volume, 2);
 }
 
 TEST(Manifold, SweptComplex) {
   auto sphere = Manifold::Sphere(0.6, 20);
   auto cube = Manifold::Cube({1.0, 1.0, 1.0}, true);
+  // Test Translation Variant
   auto sweptShape = (cube - sphere).Sweep({0.1, 0.3, 0.1});
+  EXPECT_FLOAT_EQ(sweptShape.GetProperties().volume, 0.7779319882392883);
+
+  // Test Transformation Variant
+  auto sweepMatrix = glm::mat4x3(0.0);
+  sweepMatrix[0][0] = 1.0;
+  sweepMatrix[1][1] = 1.0;
+  sweepMatrix[2][2] = 1.0;
+  sweepMatrix[0][3] = 0.1;
+  sweepMatrix[1][3] = 0.3;
+  sweepMatrix[2][3] = 0.1;
+  sweptShape = (cube - sphere).Sweep(sweepMatrix);
   EXPECT_FLOAT_EQ(sweptShape.GetProperties().volume, 0.7779319882392883);
 }

@@ -154,6 +154,12 @@ NB_MODULE(manifold3d, m) {
           },
           "Compute the convex hull enveloping a set of 3d points.")
       .def(
+          "sweep", [](Manifold &self, glm::vec3 v) { return self.Sweep(v); },
+          nb::arg("v"),
+          "Sweep this Manifold through space."
+          "\n\n"
+          ":param v: The vector to add to every vertex.")
+      .def(
           "sweep",
           [](Manifold &self, float x = 0.0f, float y = 0.0f, float z = 0.0f) {
             return self.Sweep(glm::vec3(x, y, z));
@@ -164,10 +170,24 @@ NB_MODULE(manifold3d, m) {
           ":param x: X axis translation. (default 0.0).\n"
           ":param y: Y axis translation. (default 0.0).\n"
           ":param z: Z axis translation. (default 0.0).")
-      .def("sweep", &Manifold::Sweep, nb::arg("t"),
-           "Sweep this Manifold through space."
-           "\n\n"
-           ":param v: The vector to add to every vertex.")
+      .def(
+          "sweep",
+          [](Manifold &self, nb::ndarray<float, nb::shape<3, 4>> &mat) {
+            if (mat.ndim() != 2 || mat.shape(0) != 3 || mat.shape(1) != 4)
+              throw std::runtime_error("Invalid matrix shape, expected (3, 4)");
+            glm::mat4x3 mat_glm;
+            for (int i = 0; i < 3; i++) {
+              for (int j = 0; j < 4; j++) {
+                mat_glm[j][i] = mat(i, j);
+              }
+            }
+            return self.Sweep(mat_glm);
+          },
+          nb::arg("m"),
+          "Sweep this Manifold in space. The first three columns form a "
+          "3x3 matrix transform and the last is a translation vector. \n"
+          "\n\n"
+          ":param m: The affine transform matrix to apply to all the vertices.")
       .def(
           "transform",
           [](Manifold &self, nb::ndarray<float, nb::shape<3, 4>> &mat) {

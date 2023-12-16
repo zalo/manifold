@@ -861,4 +861,48 @@ Manifold Manifold::Sweep(glm::vec3 v) const {
   }
 }
 
+/**
+ * Sweep this Manifold through space. The first three columns form a 3x3 matrix
+ * transform and the last is a translation vector.
+ *
+ * @param m The affine transform matrix to apply to all the vertices.
+ */
+Manifold Manifold::Sweep(const glm::mat4x3& m) const {
+  // Slow(?) isConvex Check - Make Faster??
+  bool isConvex = GetProperties().volume == Hull().GetProperties().volume;
+
+  if (isConvex) {
+    // If Convex, just hull with its transformed self
+    return Hull({*this, Transform(m)});
+  } else {
+    // Else, sweep each triangle individually
+    Mesh mesh = GetMesh();
+    Manifold output = AsOriginal();
+    for (size_t i = 0; i < mesh.triVerts.size(); i++) {
+      glm::vec3 derp1 = m * glm::vec4(mesh.vertPos[mesh.triVerts[i].x].x,
+                                      mesh.vertPos[mesh.triVerts[i].x].y,
+                                      mesh.vertPos[mesh.triVerts[i].x].z, 1.0);
+      glm::vec3 derp2 = m * glm::vec4(mesh.vertPos[mesh.triVerts[i].y].x,
+                                      mesh.vertPos[mesh.triVerts[i].y].y,
+                                      mesh.vertPos[mesh.triVerts[i].y].z, 1.0);
+      glm::vec3 derp3 = m * glm::vec4(mesh.vertPos[mesh.triVerts[i].z].x,
+                                      mesh.vertPos[mesh.triVerts[i].z].y,
+                                      mesh.vertPos[mesh.triVerts[i].z].z, 1.0);
+
+      std::vector<glm::vec3> points = {
+          mesh.vertPos[mesh.triVerts[i].x],
+          mesh.vertPos[mesh.triVerts[i].y],
+          mesh.vertPos[mesh.triVerts[i].z],
+          derp1,
+          derp2,
+          derp3,
+      };
+
+      Manifold sweptTriangle = Hull(points);
+      output += sweptTriangle;
+    }
+    return output;
+  }
+}
+
 }  // namespace manifold

@@ -16,6 +16,7 @@
 #include <map>
 #include <numeric>
 #include <unordered_map>
+#include <set>
 
 #include "QuickHull.hpp"
 #include "boolean3.h"
@@ -613,92 +614,145 @@ Manifold Manifold::Offset(float delta, int circularSegments) const {
 
   // Extrude Triangles
   batch.resize(NumTri() + batch.size());
-  for_each_n(countAt(0), NumTri(), [&batch, &block, &pImpl, radius](int tri) {
-    glm::mat3 triPos;
-    for (const int i : {0, 1, 2}) {
-      triPos[i] = pImpl->vertPos_[pImpl->halfedge_[3 * tri + i].startVert];
-    }
-    const glm::dvec3 normal =
-        (double)radius * (glm::dvec3)pImpl->faceNormal_[tri];
-    batch[1 + tri] = block.Warp([triPos, normal](glm::vec3& pos) {
-      glm::dvec3 offset = (pos.z > 0 ? normal : -normal);
-      if (pos.x < 0) {
-        pos = (glm::dvec3)triPos[0] + offset;
-      } else if (pos.x > 0) {
-        pos = (glm::dvec3)triPos[1] + offset;
-      } else {
-        pos = (glm::dvec3)triPos[2] + offset;
+
+  if (circularSegments == 0) {
+    // Calculate Vertex Normals
+    Vec<glm::vec3> vertOffsets(NumVert(), glm::vec3(0.0f, 0.0f, 0.0f));
+    Vec<std::set<double>> vertNormalChecker(NumVert(), std::set<double>());
+    for (size_t face = 0; face < NumTri(); face++) {
+      glm::vec3 norm = pImpl->faceNormal_[face];
+      double normKey = (norm.x * 1000000.0) + (norm.y * 1000.0) + norm.z;
+      for (const int i : {0, 1, 2}) {
+        const int vertIdx = pImpl->halfedge_[3 * face + i].startVert;
+        if (vertNormalChecker[vertIdx].count(normKey) == 0) {
+          vertOffsets[vertIdx] += norm;
+          vertNormalChecker[vertIdx].insert(normKey);
+        }
       }
+    }
+    for (size_t i = 0; i < NumVert(); i++) {
+      vertOffsets[i] = radius * glm::normalize(vertOffsets[i]);
+    }
+
+    // Extrude Along Vertex Normals
+    for_each_n(
+        countAt(0), NumTri(),
+        [&batch, &block, &pImpl, &vertOffsets, radius](int tri) {
+          glm::mat3 triPos, triOffset;
+          for (const int i : {0, 1, 2}) {
+            triPos[i] =
+                pImpl->vertPos_[pImpl->halfedge_[3 * tri + i].startVert];
+            triOffset[i] = vertOffsets[pImpl->halfedge_[3 * tri + i].startVert];
+          }
+          batch[1 + tri] =
+              block.Warp([triPos, triOffset, radius](glm::vec3& pos) {
+                if (pos.x < 0) {
+                  pos = triPos[0] + (pos.z > 0 ? triOffset[0] : -triOffset[0]);
+                } else if (pos.x > 0) {
+                  pos = triPos[1] + (pos.z > 0 ? triOffset[1] : -triOffset[1]);
+                } else {
+                  pos = triPos[2] + (pos.z > 0 ? triOffset[2] : -triOffset[2]);
+                }
+              });
+          //batch[1 + tri] =
+          //    Hull({triPos[0], triPos[1], triPos[2], triPos[0] + triOffset[0],
+          //          triPos[1] + triOffset[1], triPos[2] + triOffset[2]});
+        });
+  } else {
+    // Extrude along Triangle Face Normals
+    for_each_n(countAt(0), NumTri(), [&batch, &block, &pImpl, radius](int tri) {
+      glm::mat3 triPos;
+      for (const int i : {0, 1, 2}) {
+        triPos[i] = pImpl->vertPos_[pImpl->halfedge_[3 * tri + i].startVert];
+      }
+      const glm::dvec3 normal =
+          (double)radius * (glm::dvec3)pImpl->faceNormal_[tri];
+      batch[1 + tri] = block.Warp([triPos, normal](glm::vec3& pos) {
+        glm::dvec3 offset = (pos.z > 0 ? normal : -normal);
+        if (pos.x < 0) {
+          pos = (glm::dvec3)triPos[0] + offset;
+        } else if (pos.x > 0) {
+          pos = (glm::dvec3)triPos[1] + offset;
+        } else {
+          pos = (glm::dvec3)triPos[2] + offset;
+        }
+      });
     });
-  });
 
-  // Iterate over all the edges to find the convex edges and vertices
-  std::unordered_map<int, std::vector<glm::vec3>> verticesToCenteredWedgePoints;
+    // Iterate over all the edges to find the convex edges and vertices
+    std::unordered_map<int, std::vector<glm::vec3>>
+        verticesToCenteredWedgePoints;
 
-  for (int idx = 0; idx < pImpl->halfedge_.size(); idx++) {
-    // Determine if the Current HalfEdge is a Forward-facing Convex Edge
-    const Halfedge edge = pImpl->halfedge_[idx];
-    if (!edge.IsForward()) continue;
-    const glm::vec3 normal0 = pImpl->faceNormal_[edge.face];
-    const glm::vec3 normal1 =
-        pImpl->faceNormal_[pImpl->halfedge_[edge.pairedHalfedge].face];
-    if (glm::all(glm::equal(normal0, normal1))) continue;
-    const glm::vec3 edgeVec =
-        pImpl->vertPos_[edge.endVert] - pImpl->vertPos_[edge.startVert];
-    const bool convex = ((inset ? -1 : 1) *
-                         glm::dot(edgeVec, glm::cross(normal0, normal1))) > 0;
+    for (int idx = 0; idx < pImpl->halfedge_.size(); idx++) {
+      // Determine if the Current HalfEdge is a Forward-facing Convex Edge
+      const Halfedge edge = pImpl->halfedge_[idx];
+      if (!edge.IsForward()) continue;
+      const glm::vec3 normal0 = pImpl->faceNormal_[edge.face];
+      const glm::vec3 normal1 =
+          pImpl->faceNormal_[pImpl->halfedge_[edge.pairedHalfedge].face];
+      if (glm::all(glm::equal(normal0, normal1))) continue;
+      const glm::vec3 edgeVec =
+          pImpl->vertPos_[edge.endVert] - pImpl->vertPos_[edge.startVert];
+      const bool convex =
+          ((inset ? -1 : 1) * glm::dot(edgeVec, glm::cross(normal0, normal1))) >
+          1e-5f;
 
-    // If so, construct a wedge around this edge
-    if (convex) {
-      // Compute wedge points by rotating around the edgeVec from normal0 to
-      // normal1
-      float normal0Tonormal1Angle = fmodf(
-          atan2(glm::dot(glm::normalize(edgeVec), glm::cross(normal0, normal1)),
+      // If so, construct a wedge around this edge
+      if (convex) {
+        // Compute wedge points by rotating around the edgeVec from normal0 to
+        // normal1
+        float normal0Tonormal1Angle = fmodf(
+            atan2(
+                glm::dot(glm::normalize(edgeVec), glm::cross(normal0, normal1)),
                 glm::dot(normal0, normal1)),
-          glm::two_pi<float>());
+            glm::two_pi<float>());
 
-      int numSegments = abs((int)((normal0Tonormal1Angle / glm::two_pi<float>()) * (n * 4)));
+        int numSegments = abs(
+            (int)((normal0Tonormal1Angle / glm::two_pi<float>()) * (n * 4)));
 
-      std::vector<glm::vec3> wedgePointsStart;
-      std::vector<glm::vec3> wedgePointsEnd;
-      for (int seg = 0; seg <= numSegments; seg++) {
-        float wdgAlpha = (float)seg / numSegments;
-        glm::qua rotation = glm::angleAxis(wdgAlpha * normal0Tonormal1Angle,
-                                           glm::normalize(edgeVec));
-        glm::vec3 wedgePt = rotation * (normal0 * delta);
-        wedgePointsStart.push_back(pImpl->vertPos_[edge.startVert] + wedgePt);
-        wedgePointsEnd.push_back(pImpl->vertPos_[edge.endVert] + wedgePt);
+        std::vector<glm::vec3> wedgePointsStart;
+        std::vector<glm::vec3> wedgePointsEnd;
+        for (int seg = 0; seg <= numSegments; seg++) {
+          float wdgAlpha = (float)seg / numSegments;
+          glm::qua rotation = glm::angleAxis(wdgAlpha * normal0Tonormal1Angle,
+                                             glm::normalize(edgeVec));
+          glm::vec3 wedgePt = rotation * (normal0 * delta);
+          wedgePointsStart.push_back(pImpl->vertPos_[edge.startVert] + wedgePt);
+          wedgePointsEnd.push_back(pImpl->vertPos_[edge.endVert] + wedgePt);
+        }
+
+        // Add the WedgePoints to each Convex Vertex for use later
+        verticesToCenteredWedgePoints[edge.startVert].insert(
+            verticesToCenteredWedgePoints[edge.startVert].end(),
+            wedgePointsStart.begin(), wedgePointsStart.end());
+        verticesToCenteredWedgePoints[edge.endVert].insert(
+            verticesToCenteredWedgePoints[edge.endVert].end(),
+            wedgePointsEnd.begin(), wedgePointsEnd.end());
+
+        // Also construct the wedge shape while we're here
+        // Not-Minimal if Wedge is 180 degrees... which they all are...
+        // Doesn't seem to be an issue though.
+        std::vector<glm::vec3> fullWedgePoints;  // 2 * (wedgePoints.size()));
+        fullWedgePoints.push_back(pImpl->vertPos_[edge.startVert]);
+        fullWedgePoints.push_back(pImpl->vertPos_[edge.endVert]);
+        fullWedgePoints.insert(fullWedgePoints.end(), wedgePointsStart.begin(),
+                               wedgePointsStart.end());
+        fullWedgePoints.insert(fullWedgePoints.end(), wedgePointsEnd.begin(),
+                               wedgePointsEnd.end());
+        batch.push_back(Hull(fullWedgePoints));
       }
-
-      // Add the WedgePoints to each Convex Vertex for use later
-      verticesToCenteredWedgePoints[edge.startVert].insert(
-          verticesToCenteredWedgePoints[edge.startVert].end(),
-          wedgePointsStart.begin(), wedgePointsStart.end());
-      verticesToCenteredWedgePoints[edge.endVert].insert(
-          verticesToCenteredWedgePoints[edge.endVert].end(),
-          wedgePointsEnd.begin(), wedgePointsEnd.end());
-
-      // Also construct the wedge shape while we're here
-      std::vector<glm::vec3> fullWedgePoints;  // 2 * (wedgePoints.size()));
-      fullWedgePoints.push_back(pImpl->vertPos_[edge.startVert]);
-      fullWedgePoints.push_back(pImpl->vertPos_[edge.endVert]);
-      fullWedgePoints.insert(fullWedgePoints.end(), wedgePointsStart.begin(),
-                             wedgePointsStart.end());
-      fullWedgePoints.insert(fullWedgePoints.end(), wedgePointsEnd.begin(),
-                             wedgePointsEnd.end());
-      batch.push_back(Hull(fullWedgePoints));
     }
-  }
 
-  // Hull the wedge points for each convex vertex with a sphere
-  for (auto pair : verticesToCenteredWedgePoints) {
-    auto sphereVerts = sphere.Translate(pImpl->vertPos_[pair.first])
-                           .GetCsgLeafNode()
-                           .GetImpl()
-                           ->vertPos_;
-    pair.second.insert(pair.second.end(), sphereVerts.begin(),
-                       sphereVerts.end());
-    batch.push_back(Hull(pair.second));
+    // Hull the wedge points for each convex vertex with a sphere
+    for (auto pair : verticesToCenteredWedgePoints) {
+      auto sphereVerts = sphere.Translate(pImpl->vertPos_[pair.first])
+                             .GetCsgLeafNode()
+                             .GetImpl()
+                             ->vertPos_;
+      pair.second.insert(pair.second.end(), sphereVerts.begin(),
+                         sphereVerts.end());
+      batch.push_back(Hull(pair.second));
+    }
   }
 
   return BatchBoolean(batch, inset ? OpType::Subtract : OpType::Add);

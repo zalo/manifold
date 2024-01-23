@@ -1,3 +1,9 @@
+# Manifold - Voronoi Convex Decomposition Edition
+
+This fork of Manifold contains the VoCD (Voronoi Convex Decomposition) algorithm.
+
+VoCD is a novel exact convex decomposition algorithm that is faster and simpler than the alternatives in libraries like CGAL. It is based on the notion that triangles can be exactly segmented with a power diagram of each triangle's circumcenter and circumradius. Reflex Faces are added to the voronoi diagram to ensure that the convex voronoi cells will exactly cut along reflexe edges, ensuring a constant decomposition of 2 * the number of reflex edges.
+
 [![codecov](https://codecov.io/github/elalish/manifold/branch/master/graph/badge.svg?token=IIA8G5HVS7)](https://codecov.io/github/elalish/manifold)
 [![PyPI version](https://badge.fury.io/py/manifold3d.svg)](https://badge.fury.io/py/manifold3d)
 [![npm version](https://badge.fury.io/js/manifold-3d.svg)](https://badge.fury.io/js/manifold-3d)

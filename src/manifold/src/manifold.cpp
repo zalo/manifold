@@ -1037,6 +1037,19 @@ std::vector<int> Manifold::ReflexFaces(double tolerance) const {
 std::vector<Manifold> Manifold::ConvexDecomposition() const {
   ZoneScoped;
 
+  //// Simplify the input mesh until it cannot be simplified any further
+  //auto simpl = std::make_shared<Impl>(*GetCsgLeafNode().GetImpl());
+  //int oldEdgeCount = 0, edgeCount = simpl->halfedge_.size();
+  //bool modified = false;
+  //while (oldEdgeCount != edgeCount) {
+  //  // Instead, count the number of edges not marked for deletion
+  //  edgeCount = simpl->halfedge_.size();
+  //  std::cout << "[INFO] Running Topology Simplification Pass..." << std::endl;
+  //  simpl->SimplifyTopology();
+  //  simpl->Finish();
+  //  oldEdgeCount = edgeCount;
+  //}
+
   // Early-Exit if the manifold is already convex
   std::vector<int> uniqueFaces = ReflexFaces();
   if (uniqueFaces.size() == 0) {

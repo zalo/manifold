@@ -1,4 +1,4 @@
-# Manifold - __VOCD Edition__
+# Manifold - VOCD Edition
 
 This fork of Manifold contains the VoCD (Voronoi Convex Decomposition) algorithm.
 
@@ -7,7 +7,7 @@ VoCD is a novel exact convex decomposition algorithm that is faster and simpler 
 Example Program:
 
 ```python
-import manifold3d # <--- Using this zalo/manifold@feat-voacd
+import manifold3d # <--- Using this branch - zalo/manifold@feat-voacd
 import random
 import trimesh
 import numpy as np

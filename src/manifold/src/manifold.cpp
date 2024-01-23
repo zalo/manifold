@@ -82,6 +82,9 @@ struct ComputeVoronoiCell {
                                   cell_pos.y + 0.5 * c.pts[(4 * i) + 1],
                                   cell_pos.z + 0.5 * c.pts[(4 * i) + 2]));
       }
+
+      // c.neighbors - Check neighbors for Mergeability...
+
       (*output)[cell_idx.x] = Manifold::Hull(verts) ^ *original;
       verts.clear();
     } else {

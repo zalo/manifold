@@ -374,6 +374,7 @@ NB_MODULE(manifold3d, m) {
             }
             return self.Fracture(pts_vec, weights_vec);
           }, nb::arg("pts"), nb::arg("weights"))
+      .def("convex_decomposition", &Manifold::ConvexDecomposition)
       .def("status", &Manifold::Status, manifold__status)
       .def(
           "bounding_box",

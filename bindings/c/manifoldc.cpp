@@ -403,9 +403,9 @@ ManifoldManifoldVec *manifold_decompose(void *mem, ManifoldManifold *m) {
   return to_c(new (mem) std::vector<Manifold>(comps));
 }
 
-ManifoldManifold *manifold_fracture(void *mem, ManifoldManifold *m,
-                                    ManifoldVec3 *points, float *weights,
-                                    size_t length) {
+ManifoldManifoldVec *manifold_fracture(void *mem, ManifoldManifold *m,
+                                       ManifoldVec3 *points, float *weights,
+                                       size_t length) {
   std::vector<glm::dvec3> pts(length);
   std::vector<double> wts(length);
   for (int i = 0; i < length; ++i) {
@@ -416,8 +416,8 @@ ManifoldManifold *manifold_fracture(void *mem, ManifoldManifold *m,
   return to_c(new (mem) std::vector<Manifold>(comps));
 }
 
-ManifoldManifold *manifold_convex_decomposition(void *mem,
-                                                ManifoldManifold *m) {
+ManifoldManifoldVec *manifold_convex_decomposition(void *mem,
+                                                   ManifoldManifold *m) {
   auto comps = from_c(m)->ConvexDecomposition();
   return to_c(new (mem) std::vector<Manifold>(comps));
 }

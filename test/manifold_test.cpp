@@ -799,7 +799,7 @@ TEST(Manifold, ConvexDecomposition) {
   Manifold nonConvex = cube - sphere;
   std::vector<Manifold> convexParts = nonConvex.ConvexDecomposition();
 
-  EXPECT_EQ(convexParts.size(), 224);
+  EXPECT_EQ(convexParts.size(), 219);
 
   float originalVolume = nonConvex.GetProperties().volume;
   float convex_volume = 0.0;

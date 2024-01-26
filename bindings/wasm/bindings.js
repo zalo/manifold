@@ -291,8 +291,8 @@ Module.setup = function() {
 
   Module.Manifold.prototype.fracture = function(points, weights) {
     if (points instanceof Array) {
-      let pts = new Module.Vector_vec3();
-      let wts = new Module.Vector_f32();
+      let pts = new Module.Vector_dvec3();
+      let wts = new Module.Vector_f64();
       for (const m of points) {
         if (m instanceof Array && typeof m[0] == 'number' && m.length >= 3) {
           pts.push_back({x: m[0], y: m[1], z: m[2]});

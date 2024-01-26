@@ -1000,7 +1000,7 @@ std::vector<Manifold> Manifold::Fracture(const std::vector<glm::dvec3>& pts,
       cellIndices.size(), computeVoronoiCell);
   return output;
 }
-std::vector<Manifold> Manifold::Fracture(
+/*std::vector<Manifold> Manifold::Fracture(
     const std::vector<glm::vec3>& pts,
     const std::vector<float>& weights) const {
   std::vector<glm::dvec3> highpVerts(pts.size());
@@ -1010,7 +1010,7 @@ std::vector<Manifold> Manifold::Fracture(
     highpWeights[i] = weights[i];
   }
   return Fracture(highpVerts, highpWeights);
-}
+}*/
 
 std::vector<int> Manifold::ReflexFaces(double tolerance) const {
   std::unordered_set<int> uniqueReflexFaceSet;

@@ -40,6 +40,11 @@ struct glm_name<glm::vec3> {
   static constexpr char const multi_name[] = "FloatNx3";
 };
 template <>
+struct glm_name<glm::dvec3> {
+  static constexpr char const name[] = "Doublex3";
+  static constexpr char const multi_name[] = "DoubleNx3";
+};
+template <>
 struct glm_name<glm::vec2> {
   static constexpr char const name[] = "Floatx2";
   static constexpr char const multi_name[] = "FloatNx2";

@@ -88,8 +88,10 @@ EMSCRIPTEN_BINDINGS(whatever) {
   register_vector<glm::ivec3>("Vector_ivec3");
   register_vector<glm::vec3>("Vector_vec3");
   register_vector<glm::vec2>("Vector_vec2");
+  register_vector<glm::dvec3>("Vector_dvec3");
   register_vector<std::vector<glm::vec2>>("Vector2_vec2");
   register_vector<float>("Vector_f32");
+  register_vector<double>("Vector_f64");
   register_vector<CrossSection>("Vector_crossSection");
   register_vector<Manifold>("Vector_manifold");
   register_vector<Smoothness>("Vector_smoothness");

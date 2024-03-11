@@ -24,6 +24,8 @@
 #define ENABLE_VHACD_IMPLEMENTATION 1
 #include "VHACD.h"
 
+#include "hull.h"
+
 namespace {
 using namespace manifold;
 using namespace thrust::placeholders;
@@ -871,7 +873,7 @@ Manifold Manifold::Hull(const std::vector<glm::vec3>& pts) {
 }
 
 /**
- * Compute the convex hull of a set of points using VHACD's Convex Hull 
+ * Compute the convex hull of a set of points using Stan Melax's Convex Hull
  * Implementation. If the given points are fewer than 4, or they are all 
  * coplanar, an empty Manifold will be returned.
  *
@@ -882,6 +884,42 @@ Manifold Manifold::Hull2(const std::vector<glm::vec3>& pts) {
   ZoneScoped;
   const int numVert = pts.size();
   if (numVert < 4) return Manifold();
+
+  std::vector<float3> vertices(numVert);
+  for (int i = 0; i < numVert; i++) {
+    vertices[i].x = pts[i].x;
+    vertices[i].y = pts[i].y;
+    vertices[i].z = pts[i].z;
+  }
+
+  // Compute the Convex Hull
+  std::vector<int3> triangles = calchull(vertices, numVert);
+
+  Mesh mesh;
+
+  mesh.vertPos = pts;
+  mesh.triVerts.reserve(triangles.size());
+  for (int i = 0; i < triangles.size(); i++) {
+    mesh.triVerts.push_back({triangles[i].x, triangles[i].y, triangles[i].z});
+  }
+
+  return Manifold(mesh);
+}
+
+/**
+ * Compute the convex hull of a set of points using VHACD's Convex Hull 
+ * Implementation. If the given points are fewer than 4, or they are all
+ * coplanar, an empty Manifold will be returned.
+ *
+ * @param pts A vector of 3-dimensional points over which to compute a convex
+ * hull.
+ */
+Manifold Manifold::Hull3(const std::vector<glm::vec3>& pts) {
+  ZoneScoped;
+  const int numVert = pts.size();
+  if (numVert < 4) return Manifold();
+
+
 
   std::vector<VHACD::Vertex> vertices(numVert);
   for (int i = 0; i < numVert; i++) {
@@ -905,10 +943,12 @@ Manifold Manifold::Hull2(const std::vector<glm::vec3>& pts) {
 
   auto outputVertices = hull.GetList();
   mesh.triVerts.reserve(outputVertices.size());
-  for (std::list<VHACD::ConvexHullFace>::const_iterator node = outputVertices.begin();
+  for (std::list<VHACD::ConvexHullFace>::const_iterator node =
+           outputVertices.begin();
        node != outputVertices.end(); ++node) {
     const VHACD::ConvexHullFace& face = *node;
-    mesh.triVerts.push_back({face.m_index[0], face.m_index[1], face.m_index[2]});
+    mesh.triVerts.push_back(
+        {face.m_index[0], face.m_index[1], face.m_index[2]});
   }
 
   return Manifold(mesh);
@@ -923,6 +963,12 @@ Manifold Manifold::Hull() const { return Hull(GetMesh().vertPos); }
  * Compute the convex hull of this manifold.
  */
 Manifold Manifold::Hull2() const { return Hull2(GetMesh().vertPos); }
+
+/**
+ * Compute the convex hull of this manifold.
+ */
+Manifold Manifold::Hull3() const { return Hull3(GetMesh().vertPos); }
+
 
 /**
  * Compute the convex hull enveloping a set of manifolds.
@@ -940,5 +986,14 @@ Manifold Manifold::Hull(const std::vector<Manifold>& manifolds) {
  */
 Manifold Manifold::Hull2(const std::vector<Manifold>& manifolds) {
   return Compose(manifolds).Hull2();
+}
+
+/**
+ * Compute the convex hull enveloping a set of manifolds.
+ *
+ * @param manifolds A vector of manifolds over which to compute a convex hull.
+ */
+Manifold Manifold::Hull3(const std::vector<Manifold>& manifolds) {
+  return Compose(manifolds).Hull3();
 }
 }  // namespace manifold

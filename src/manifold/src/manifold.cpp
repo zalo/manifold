@@ -21,6 +21,8 @@
 #include "csg_tree.h"
 #include "impl.h"
 #include "par.h"
+#define ENABLE_VHACD_IMPLEMENTATION 1
+#include "VHACD.h"
 
 namespace {
 using namespace manifold;
@@ -869,9 +871,58 @@ Manifold Manifold::Hull(const std::vector<glm::vec3>& pts) {
 }
 
 /**
+ * Compute the convex hull of a set of points using VHACD's Convex Hull 
+ * Implementation. If the given points are fewer than 4, or they are all 
+ * coplanar, an empty Manifold will be returned.
+ *
+ * @param pts A vector of 3-dimensional points over which to compute a convex
+ * hull.
+ */
+Manifold Manifold::Hull2(const std::vector<glm::vec3>& pts) {
+  ZoneScoped;
+  const int numVert = pts.size();
+  if (numVert < 4) return Manifold();
+
+  std::vector<VHACD::Vertex> vertices(numVert);
+  for (int i = 0; i < numVert; i++) {
+    vertices[i].mX = pts[i].x;
+    vertices[i].mY = pts[i].y;
+    vertices[i].mZ = pts[i].z;
+  }
+
+  // Compute the Convex Hull
+  VHACD::ConvexHull hull(vertices, double(0.0000001));
+
+  Mesh mesh;
+
+  auto& vlist = hull.GetVertexPool();
+  if (!vlist.empty()) {
+    mesh.vertPos.resize(vlist.size());
+    for (int i = 0; i < vlist.size(); i++) {
+      mesh.vertPos[i] = {vlist[i].GetX(), vlist[i].GetY(), vlist[i].GetZ()};
+    }
+  }
+
+  auto outputVertices = hull.GetList();
+  mesh.triVerts.reserve(outputVertices.size());
+  for (std::list<VHACD::ConvexHullFace>::const_iterator node = outputVertices.begin();
+       node != outputVertices.end(); ++node) {
+    const VHACD::ConvexHullFace& face = *node;
+    mesh.triVerts.push_back({face.m_index[0], face.m_index[1], face.m_index[2]});
+  }
+
+  return Manifold(mesh);
+}
+
+/**
  * Compute the convex hull of this manifold.
  */
 Manifold Manifold::Hull() const { return Hull(GetMesh().vertPos); }
+
+/**
+ * Compute the convex hull of this manifold.
+ */
+Manifold Manifold::Hull2() const { return Hull2(GetMesh().vertPos); }
 
 /**
  * Compute the convex hull enveloping a set of manifolds.
@@ -880,5 +931,14 @@ Manifold Manifold::Hull() const { return Hull(GetMesh().vertPos); }
  */
 Manifold Manifold::Hull(const std::vector<Manifold>& manifolds) {
   return Compose(manifolds).Hull();
+}
+
+/**
+ * Compute the convex hull enveloping a set of manifolds.
+ *
+ * @param manifolds A vector of manifolds over which to compute a convex hull.
+ */
+Manifold Manifold::Hull2(const std::vector<Manifold>& manifolds) {
+  return Compose(manifolds).Hull2();
 }
 }  // namespace manifold

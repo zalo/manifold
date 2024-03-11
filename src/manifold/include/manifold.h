@@ -280,8 +280,11 @@ class Manifold {
    */
   ///@{
   Manifold Hull() const;
+  Manifold Hull2() const;
   static Manifold Hull(const std::vector<Manifold>& manifolds);
   static Manifold Hull(const std::vector<glm::vec3>& pts);
+  static Manifold Hull2(const std::vector<Manifold>& manifolds);
+  static Manifold Hull2(const std::vector<glm::vec3>& pts);
   ///@}
 
   /** @name Testing hooks

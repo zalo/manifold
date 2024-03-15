@@ -23,8 +23,8 @@
 #include "par.h"
 #define ENABLE_VHACD_IMPLEMENTATION 1
 #include "VHACD.h"
-
 #include "hull.h"
+
 
 namespace {
 using namespace manifold;
@@ -885,22 +885,30 @@ Manifold Manifold::Hull2(const std::vector<glm::vec3>& pts) {
   const int numVert = pts.size();
   if (numVert < 4) return Manifold();
 
-  std::vector<float3> vertices(numVert);
+  std::vector<float3> vertices;
+  vertices.resize(numVert);
   for (int i = 0; i < numVert; i++) {
-    vertices[i].x = pts[i].x;
-    vertices[i].y = pts[i].y;
-    vertices[i].z = pts[i].z;
+    vertices[i] = float3(pts[i][0], pts[i][1], pts[i][2]);
   }
 
   // Compute the Convex Hull
   std::vector<int3> triangles = calchull(vertices, numVert);
+  const int numTri = triangles.size();
+
+  std::cout << "Calculated Num Verts: " << numVert
+            << ", Num triangles: " << numTri << std::endl;
 
   Mesh mesh;
-
-  mesh.vertPos = pts;
-  mesh.triVerts.reserve(triangles.size());
-  for (int i = 0; i < triangles.size(); i++) {
-    mesh.triVerts.push_back({triangles[i].x, triangles[i].y, triangles[i].z});
+  mesh.vertPos.reserve(numVert);
+  for (int i = 0; i < numVert; i++) {
+    mesh.vertPos[i] = {pts[i].x, pts[i].y, pts[i].z};
+  }
+  mesh.triVerts.reserve(numTri);
+  for (int i = 0; i < numTri; i++) {
+    //std::cout << "New Triangle Indices: " << triangles[i].x << ", "
+    //          << triangles[i].y << ", " << triangles[i].z
+    //          << std::endl;
+    mesh.triVerts.push_back({triangles[i].y, triangles[i].x, triangles[i].z});
   }
 
   return Manifold(mesh);

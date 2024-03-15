@@ -863,6 +863,25 @@ TEST(Manifold, EmptyHull2) {
   EXPECT_TRUE(Manifold::Hull2(coplanar).IsEmpty());
 }
 
+//TEST(Manifold, TictacHull3) {
+//  const float tictacRad = 100;
+//  const float tictacHeight = 500;
+//  const int tictacSeg = 1000;
+//  const float tictacMid = tictacHeight - 2 * tictacRad;
+//  const auto sphere = Manifold::Sphere(tictacRad, tictacSeg);
+//  const std::vector<Manifold> spheres{sphere,
+//                                      sphere.Translate({0, 0, tictacMid})};
+//  const auto tictac = Manifold::Hull3(spheres);
+//
+//#ifdef MANIFOLD_EXPORT
+//  if (options.exportModels) {
+//    ExportMesh("tictac_hull3.glb", tictac.GetMesh(), {});
+//  }
+//#endif
+//
+//  EXPECT_EQ(sphere.NumVert() + tictacSeg, tictac.NumVert());
+//}
+
 TEST(Manifold, HollowHull3) {
   auto sphere = Manifold::Sphere(100, 360);
   auto hollow = sphere - sphere.Scale({0.8, 0.8, 0.8});

@@ -1041,8 +1041,8 @@ std::vector<int> Manifold::ReflexFaces(double tolerance) const {
   return uniqueFaces;
 }
 
-std::vector<Halfedge> Manifold::ReflexEdges(double tolerance) const {
-  std::vector<Halfedge> uniqueEdges;
+std::vector<glm::ivec2> Manifold::ReflexEdges(double tolerance) const {
+  std::vector<glm::ivec2> uniqueEdges;
   const Impl& impl = *GetCsgLeafNode().GetImpl();
   for (size_t i = 0; i < impl.halfedge_.size(); i++) {
     Halfedge halfedge = impl.halfedge_[i];
@@ -1057,7 +1057,7 @@ std::vector<Halfedge> Manifold::ReflexEdges(double tolerance) const {
         glm::dot((glm::dvec3)impl.faceNormal_[faceB], tangent);
     //  If we've found a reflex edge, add it to the vector
     if (tangentProjection > tolerance) {
-      uniqueEdges.push_back(halfedge);
+      uniqueEdges.push_back(glm::ivec2(halfedge.startVert, halfedge.endVert));
     }
   }
   return uniqueEdges;
@@ -1146,7 +1146,7 @@ std::vector<Manifold> Manifold::ConvexDecomposition() const {
   ZoneScoped;
 
   // Early-Exit if the manifold is already convex
-  std::vector<Halfedge> uniqueEdges = ReflexEdges();
+  std::vector<glm::ivec2> uniqueEdges = ReflexEdges();
   if (uniqueEdges.size() == 0) {
     return std::vector<Manifold>(1, *this);
   }
@@ -1190,7 +1190,7 @@ std::vector<Manifold> Manifold::ConvexDecomposition() const {
   for (int i = 0; i < uniqueEdges.size(); i++) {
     std::vector<size_t> tetIndices;
     // If I am insanely lucky, startVert and endVert are the same indices between the triangle and tetrahedral meshes...
-    tin->ET(uniqueEdges[i].startVert, uniqueEdges[i].endVert, tetIndices);
+    tin->ET(uniqueEdges[i].x, uniqueEdges[i].y, tetIndices);
 
     // Compute circumspheres for each tetrahedron attached to the reflex edge
     for (int i = 0; i < tetIndices.size(); i++) {

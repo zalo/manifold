@@ -261,6 +261,7 @@ class Manifold {
   //std::vector<Manifold> Fracture(const std::vector<glm::vec3>& pts,
   //                               const std::vector<float>& weights) const;
   std::vector<int> ReflexFaces(double tolerance = 1e-8) const;
+  std::vector<Halfedge> ReflexEdges(double tolerance = 1e-8) const;
   std::vector<Manifold> ConvexDecomposition() const;
   ///@}
 

@@ -25,6 +25,10 @@
 #include "par.h"
 #include "voro++.hh"
 
+#include "delaunay.h"
+#include "inputPLC.h"
+#include "PLC.h"
+
 namespace {
 using namespace manifold;
 using namespace thrust::placeholders;
@@ -1037,6 +1041,29 @@ std::vector<int> Manifold::ReflexFaces(double tolerance) const {
   return uniqueFaces;
 }
 
+std::vector<Halfedge> Manifold::ReflexEdges(double tolerance) const {
+  std::vector<Halfedge> uniqueEdges;
+  const Impl& impl = *GetCsgLeafNode().GetImpl();
+  for (size_t i = 0; i < impl.halfedge_.size(); i++) {
+    Halfedge halfedge = impl.halfedge_[i];
+    if (!halfedge.IsForward()) continue;  // Skip reverse halfedges
+    int faceA = halfedge.face;
+    int faceB = impl.halfedge_[halfedge.pairedHalfedge].face;
+    glm::dvec3 tangent =
+        glm::cross((glm::dvec3)impl.faceNormal_[faceA],
+                   (glm::dvec3)impl.vertPos_[impl.halfedge_[i].endVert] -
+                       (glm::dvec3)impl.vertPos_[impl.halfedge_[i].startVert]);
+    double tangentProjection =
+        glm::dot((glm::dvec3)impl.faceNormal_[faceB], tangent);
+    //  If we've found a reflex edge, add it to the vector
+    if (tangentProjection > tolerance) {
+      uniqueEdges.push_back(halfedge);
+    }
+  }
+  return uniqueEdges;
+}
+
+/*
 std::vector<Manifold> Manifold::ConvexDecomposition() const {
   ZoneScoped;
 
@@ -1096,6 +1123,127 @@ std::vector<Manifold> Manifold::ConvexDecomposition() const {
     // }
   }
 
+  for (size_t i = 0; i < circumcenters.size() - 1; i++) {
+    for (size_t j = circumcenters.size() - 1; j > i; j--) {
+      if (glm::distance(circumcenters[i], circumcenters[j]) < 1e-9 ||
+          circumradii[j] < 0.0) {
+        std::vector<glm::dvec3>::iterator it = circumcenters.begin();
+        std::advance(it, j);
+        circumcenters.erase(it);
+        std::vector<double>::iterator it2 = circumradii.begin();
+        std::advance(it2, j);
+        circumradii.erase(it2);
+      }
+    }
+  }
+
+  std::vector<Manifold> output = Fracture(circumcenters, circumradii);
+  output.insert(output.end(), debugShapes.begin(), debugShapes.end());
+  return output;
+}*/
+
+std::vector<Manifold> Manifold::ConvexDecomposition() const {
+  ZoneScoped;
+
+  // Early-Exit if the manifold is already convex
+  std::vector<Halfedge> uniqueEdges = ReflexEdges();
+  if (uniqueEdges.size() == 0) {
+    return std::vector<Manifold>(1, *this);
+  }
+
+  // Tetrahedrize the manifold and compute the circumspheres of the tets with reflex faces
+  const Impl& impl = *GetCsgLeafNode().GetImpl();
+
+  // Unpack the vertices into an array
+  std::vector<double> vertexPositions(impl.vertPos_.size() * 3);
+  for (size_t i = 0; i < impl.vertPos_.size(); i++) {
+    vertexPositions[i * 3 + 0] = impl.vertPos_[i].x;
+    vertexPositions[i * 3 + 1] = impl.vertPos_[i].y;
+    vertexPositions[i * 3 + 2] = impl.vertPos_[i].z;
+  }
+
+  // Unpack the triangles into a flat array
+  std::vector<uint32_t> triangles(impl.halfedge_.size() / 3 * 3);
+  for (size_t i = 0; i < impl.NumTri(); i++) {
+    triangles[i * 3 + 0] = impl.halfedge_[i * 3 + 0].startVert;
+    triangles[i * 3 + 1] = impl.halfedge_[i * 3 + 1].startVert;
+    triangles[i * 3 + 2] = impl.halfedge_[i * 3 + 2].startVert;
+  }
+
+  // Create a PLC from the input points and triangles
+  inputPLC plc;
+  plc.initFromVectors(vertexPositions.data(), vertexPositions.size(), 
+    triangles.data(), triangles.size(), true);
+
+  // Build a delaunay tetrahedrization of the vertices
+  TetMesh* tin = new TetMesh;
+  tin->init_vertices(plc.coordinates.data(), plc.numVertices());
+  tin->tetrahedrize();
+  tin->optimizeNearDegenerateTets(false);
+
+  std::vector<glm::dvec3> circumcenters(uniqueEdges.size());
+  std::vector<double> circumradii(uniqueEdges.size());
+
+  // Get the tetrahedra attached to the reflex faces and their vertices
+  //std::vector<glm::ivec4> reflexTetrahedra;
+  std::vector<Manifold> debugShapes;
+  for (int i = 0; i < uniqueEdges.size(); i++) {
+    std::vector<size_t> tetIndices;
+    // If I am insanely lucky, startVert and endVert are the same indices between the triangle and tetrahedral meshes...
+    tin->ET(uniqueEdges[i].startVert, uniqueEdges[i].endVert, tetIndices);
+
+    // Compute circumspheres for each tetrahedron attached to the reflex edge
+    for (int i = 0; i < tetIndices.size(); i++) {
+      if (tin->mark_tetrahedra[i] == DT_IN) {
+        auto tetIndices =
+            glm::ivec4(tin->tet_node[(i * 4)], tin->tet_node[(i * 4) + 1],
+                       tin->tet_node[(i * 4) + 2], tin->tet_node[(i * 4) + 3]);
+        //reflexTetrahedra.push_back(tetIndices);
+
+        double coords[3];
+        tin->vertices[tetIndices.x]->getApproxXYZCoordinates(coords[0], coords[1], coords[2]);
+        glm::dvec3 v0 = glm::dvec3(coords[0], coords[1], coords[2]);
+        tin->vertices[tetIndices.y]->getApproxXYZCoordinates(coords[0], coords[1], coords[2]);
+        glm::dvec3 v1 = glm::dvec3(coords[0], coords[1], coords[2]);
+        tin->vertices[tetIndices.z]->getApproxXYZCoordinates(coords[0], coords[1], coords[2]);
+        glm::dvec3 v2 = glm::dvec3(coords[0], coords[1], coords[2]);
+        tin->vertices[tetIndices.w]->getApproxXYZCoordinates(coords[0], coords[1], coords[2]);
+        glm::dvec3 v3 = glm::dvec3(coords[0], coords[1], coords[2]);
+
+        // Compute the circumcenter and radius of the tetrahedron from the four points
+        glm::dvec4 circumsphere = impl.Circumsphere(v0, v1, v2, v3);
+        if (circumsphere.w < 0.0) continue;  // Skip invalid spheres
+
+        circumcenters[i] =
+            glm::dvec3(circumsphere.x, circumsphere.y, circumsphere.z);
+        circumradii[i] = circumsphere.w;
+
+        // Debug Draw the Circumcenter and Triangle of Degenerate Triangles
+        // if (circumcircle.w < 0.0) {
+        //   std::cout << "Circumradius: " << circumcircle.w << std::endl;
+        //   debugShapes.push_back(Hull(
+        //       {Manifold::Sphere(circumcircle.w * 0.1, 10)
+        //            .Translate(glm::vec3(
+        //                dVerts[impl.halfedge_[(uniqueFaces[i] * 3) +
+        //                0].startVert])),
+        //        Manifold::Sphere(circumcircle.w * 0.1, 10)
+        //            .Translate(glm::vec3(
+        //                dVerts[impl.halfedge_[(uniqueFaces[i] * 3) +
+        //                1].startVert])),
+        //        Manifold::Sphere(circumcircle.w * 0.1, 10)
+        //            .Translate(glm::vec3(
+        //                dVerts[impl.halfedge_[(uniqueFaces[i] * 3) +
+        //                2].startVert]))
+        //     }));
+        //
+        //   debugShapes.push_back(Manifold::Sphere(circumcircle.w * 0.2, 10)
+        //                             .Translate(glm::vec3(circumcenters[i])));
+        // }
+      }
+    }
+  }
+
+  // Eliminate duplicate circumcenters and circumradii
   for (size_t i = 0; i < circumcenters.size() - 1; i++) {
     for (size_t j = circumcenters.size() - 1; j > i; j--) {
       if (glm::distance(circumcenters[i], circumcenters[j]) < 1e-9 ||

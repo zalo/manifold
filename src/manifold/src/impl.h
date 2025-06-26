@@ -122,6 +122,8 @@ struct Manifold::Impl {
   CrossSection Slice(float height) const;
   CrossSection Project() const;
   glm::dvec4 Circumcircle(Vec<glm::dvec3> verts, int face) const;
+  glm::dvec4 Circumsphere(glm::dvec3 v0, glm::dvec3 v1, glm::dvec3 v2,
+                          glm::dvec3 v3) const;
 
   // edge_op.cu
   void SimplifyTopology();

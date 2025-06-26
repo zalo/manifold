@@ -345,4 +345,10 @@ glm::dvec4 Manifold::Impl::Circumcircle(Vec<glm::dvec3> verts, int face) const {
   return glm::dvec4(circumcenter.x, circumcenter.y, circumcenter.z,
                     circumradius);
 }
+
+glm::dvec4 Manifold::Impl::Circumsphere(glm::dvec3 v0, glm::dvec3 v1,
+                                        glm::dvec3 v2, glm::dvec3 v3) const {
+  // TODO: Implement Circumsphere from four points!
+
+}
 }  // namespace manifold

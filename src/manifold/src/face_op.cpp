@@ -346,9 +346,64 @@ glm::dvec4 Manifold::Impl::Circumcircle(Vec<glm::dvec3> verts, int face) const {
                     circumradius);
 }
 
-glm::dvec4 Manifold::Impl::Circumsphere(glm::dvec3 v0, glm::dvec3 v1,
-                                        glm::dvec3 v2, glm::dvec3 v3) const {
-  // TODO: Implement Circumsphere from four points!
+// Implementation from: https://mobile.rodolphe-vaillant.fr/entry/127/find-a-tetrahedron-circumcenter
+glm::dvec4 Manifold::Impl::Circumsphere(glm::dvec3 a, glm::dvec3 b,
+                                        glm::dvec3 c, glm::dvec3 d) const {
+    // Use coordinates relative to point 'a' of the tetrahedron.
 
+    // ba = b - a
+    double ba_x = b.x - a.x;
+    double ba_y = b.y - a.y;
+    double ba_z = b.z - a.z;
+
+    // ca = c - a
+    double ca_x = c.x - a.x;
+    double ca_y = c.y - a.y;
+    double ca_z = c.z - a.z;
+
+    // da = d - a
+    double da_x = d.x - a.x;
+    double da_y = d.y - a.y;
+    double da_z = d.z - a.z;
+
+    // Squares of lengths of the edges incident to 'a'.
+    double len_ba = ba_x * ba_x + ba_y * ba_y + ba_z * ba_z;
+    double len_ca = ca_x * ca_x + ca_y * ca_y + ca_z * ca_z;
+    double len_da = da_x * da_x + da_y * da_y + da_z * da_z;
+
+    // Cross products of these edges.
+
+    // c cross d
+    double cross_cd_x = ca_y * da_z - da_y * ca_z;
+    double cross_cd_y = ca_z * da_x - da_z * ca_x;
+    double cross_cd_z = ca_x * da_y - da_x * ca_y;
+
+    // d cross b
+    double cross_db_x = da_y * ba_z - ba_y * da_z;
+    double cross_db_y = da_z * ba_x - ba_z * da_x;
+    double cross_db_z = da_x * ba_y - ba_x * da_y;
+
+    // b cross c
+    double cross_bc_x = ba_y * ca_z - ca_y * ba_z;
+    double cross_bc_y = ba_z * ca_x - ca_z * ba_x;
+    double cross_bc_z = ba_x * ca_y - ca_x * ba_y;
+
+    // Calculate the denominator of the formula.
+    double denominator =
+        0.5 / (ba_x * cross_cd_x + ba_y * cross_cd_y + ba_z * cross_cd_z);
+
+    // Calculate offset (from 'a') of circumcenter.
+    double circ_x =
+        (len_ba * cross_cd_x + len_ca * cross_db_x + len_da * cross_bc_x) *
+        denominator;
+    double circ_y =
+        (len_ba * cross_cd_y + len_ca * cross_db_y + len_da * cross_bc_y) *
+        denominator;
+    double circ_z =
+        (len_ba * cross_cd_z + len_ca * cross_db_z + len_da * cross_bc_z) *
+        denominator;
+
+    glm::dvec3 circumcenter = glm::dvec3(circ_x, circ_y, circ_z);
+    return glm::dvec4(circumcenter.x, circumcenter.y, circumcenter.z, glm::distance(circumcenter, a));
 }
 }  // namespace manifold

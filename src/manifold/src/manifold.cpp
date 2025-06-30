@@ -25,9 +25,7 @@
 #include "par.h"
 #include "voro++.hh"
 
-#include "delaunay.h"
-#include "inputPLC.h"
-#include "PLC.h"
+
 
 namespace {
 using namespace manifold;
@@ -1151,116 +1149,59 @@ std::vector<Manifold> Manifold::ConvexDecomposition() const {
     return std::vector<Manifold>(1, *this);
   }
 
-  // Tetrahedrize the manifold and compute the circumspheres of the tets with reflex faces
+  // Basic convex decomposition using Voronoi fracture based on reflex edges
   const Impl& impl = *GetCsgLeafNode().GetImpl();
 
-  // Unpack the vertices into an array
-  std::vector<double> vertexPositions(impl.vertPos_.size() * 3);
-  for (size_t i = 0; i < impl.vertPos_.size(); i++) {
-    vertexPositions[i * 3 + 0] = impl.vertPos_[i].x;
-    vertexPositions[i * 3 + 1] = impl.vertPos_[i].y;
-    vertexPositions[i * 3 + 2] = impl.vertPos_[i].z;
+  // Generate fracture points based on reflex edges
+  std::vector<glm::dvec3> fracturePoints;
+  std::vector<double> fractureWeights;
+  
+  // Add points along reflex edges to create fracture planes
+  for (const auto& edge : uniqueEdges) {
+    glm::vec3 startPos = impl.vertPos_[edge.x];
+    glm::vec3 endPos = impl.vertPos_[edge.y];
+    glm::vec3 midpoint = (startPos + endPos) * 0.5f;
+    
+    // Add only the midpoint of each reflex edge
+    fracturePoints.push_back(glm::dvec3(midpoint));
+    fractureWeights.push_back(1.0);
   }
-
-  // Unpack the triangles into a flat array
-  std::vector<uint32_t> triangles(impl.halfedge_.size() / 3 * 3);
-  for (size_t i = 0; i < impl.NumTri(); i++) {
-    triangles[i * 3 + 0] = impl.halfedge_[i * 3 + 0].startVert;
-    triangles[i * 3 + 1] = impl.halfedge_[i * 3 + 1].startVert;
-    triangles[i * 3 + 2] = impl.halfedge_[i * 3 + 2].startVert;
-  }
-
-  // Create a PLC from the input points and triangles
-  inputPLC plc;
-  plc.initFromVectors(vertexPositions.data(), vertexPositions.size(), 
-    triangles.data(), triangles.size(), true);
-
-  // Build a delaunay tetrahedrization of the vertices
-  TetMesh* tin = new TetMesh;
-  tin->init_vertices(plc.coordinates.data(), plc.numVertices());
-  tin->tetrahedrize();
-  tin->optimizeNearDegenerateTets(false);
-
-  std::vector<glm::dvec3> circumcenters(uniqueEdges.size());
-  std::vector<double> circumradii(uniqueEdges.size());
-
-  // Get the tetrahedra attached to the reflex faces and their vertices
-  //std::vector<glm::ivec4> reflexTetrahedra;
-  std::vector<Manifold> debugShapes;
-  for (int i = 0; i < uniqueEdges.size(); i++) {
-    std::vector<size_t> tetIndices;
-    // If I am insanely lucky, startVert and endVert are the same indices between the triangle and tetrahedral meshes...
-    tin->ET(uniqueEdges[i].x, uniqueEdges[i].y, tetIndices);
-
-    // Compute circumspheres for each tetrahedron attached to the reflex edge
-    for (int i = 0; i < tetIndices.size(); i++) {
-      if (tin->mark_tetrahedra[i] == DT_IN) {
-        auto tetIndices =
-            glm::ivec4(tin->tet_node[(i * 4)], tin->tet_node[(i * 4) + 1],
-                       tin->tet_node[(i * 4) + 2], tin->tet_node[(i * 4) + 3]);
-        //reflexTetrahedra.push_back(tetIndices);
-
-        double coords[3];
-        tin->vertices[tetIndices.x]->getApproxXYZCoordinates(coords[0], coords[1], coords[2]);
-        glm::dvec3 v0 = glm::dvec3(coords[0], coords[1], coords[2]);
-        tin->vertices[tetIndices.y]->getApproxXYZCoordinates(coords[0], coords[1], coords[2]);
-        glm::dvec3 v1 = glm::dvec3(coords[0], coords[1], coords[2]);
-        tin->vertices[tetIndices.z]->getApproxXYZCoordinates(coords[0], coords[1], coords[2]);
-        glm::dvec3 v2 = glm::dvec3(coords[0], coords[1], coords[2]);
-        tin->vertices[tetIndices.w]->getApproxXYZCoordinates(coords[0], coords[1], coords[2]);
-        glm::dvec3 v3 = glm::dvec3(coords[0], coords[1], coords[2]);
-
-        // Compute the circumcenter and radius of the tetrahedron from the four points
-        glm::dvec4 circumsphere = impl.Circumsphere(v0, v1, v2, v3);
-        if (circumsphere.w < 0.0) continue;  // Skip invalid spheres
-
-        circumcenters[i] =
-            glm::dvec3(circumsphere.x, circumsphere.y, circumsphere.z);
-        circumradii[i] = circumsphere.w;
-
-        // Debug Draw the Circumcenter and Triangle of Degenerate Triangles
-        // if (circumcircle.w < 0.0) {
-        //   std::cout << "Circumradius: " << circumcircle.w << std::endl;
-        //   debugShapes.push_back(Hull(
-        //       {Manifold::Sphere(circumcircle.w * 0.1, 10)
-        //            .Translate(glm::vec3(
-        //                dVerts[impl.halfedge_[(uniqueFaces[i] * 3) +
-        //                0].startVert])),
-        //        Manifold::Sphere(circumcircle.w * 0.1, 10)
-        //            .Translate(glm::vec3(
-        //                dVerts[impl.halfedge_[(uniqueFaces[i] * 3) +
-        //                1].startVert])),
-        //        Manifold::Sphere(circumcircle.w * 0.1, 10)
-        //            .Translate(glm::vec3(
-        //                dVerts[impl.halfedge_[(uniqueFaces[i] * 3) +
-        //                2].startVert]))
-        //     }));
-        //
-        //   debugShapes.push_back(Manifold::Sphere(circumcircle.w * 0.2, 10)
-        //                             .Translate(glm::vec3(circumcenters[i])));
-        // }
+  
+  // Add a few interior points for basic subdivision if we have many reflex edges
+  if (uniqueEdges.size() > 10) {
+    Box bounds = BoundingBox();
+    glm::vec3 center = (bounds.min + bounds.max) * 0.5f;
+    glm::vec3 size = bounds.max - bounds.min;
+    
+    // Add a smaller grid of points inside the manifold
+    int gridSize = std::min(3, std::max(1, (int)std::cbrt(uniqueEdges.size() / 10)));
+    for (int x = 0; x < gridSize; x++) {
+      for (int y = 0; y < gridSize; y++) {
+        for (int z = 0; z < gridSize; z++) {
+          glm::vec3 point = bounds.min + glm::vec3(
+            (x + 0.5f) * size.x / gridSize,
+            (y + 0.5f) * size.y / gridSize,
+            (z + 0.5f) * size.z / gridSize
+          );
+          fracturePoints.push_back(glm::dvec3(point));
+          fractureWeights.push_back(1.0);
+        }
       }
     }
   }
 
-  // Eliminate duplicate circumcenters and circumradii
-  for (size_t i = 0; i < circumcenters.size() - 1; i++) {
-    for (size_t j = circumcenters.size() - 1; j > i; j--) {
-      if (glm::distance(circumcenters[i], circumcenters[j]) < 1e-9 ||
-          circumradii[j] < 0.0) {
-        std::vector<glm::dvec3>::iterator it = circumcenters.begin();
-        std::advance(it, j);
-        circumcenters.erase(it);
-        std::vector<double>::iterator it2 = circumradii.begin();
-        std::advance(it2, j);
-        circumradii.erase(it2);
-      }
+  // Use Voronoi fracture to decompose the manifold
+  std::vector<Manifold> result = Fracture(fracturePoints, fractureWeights);
+  
+  // Filter out empty results
+  std::vector<Manifold> filteredResult;
+  for (const auto& part : result) {
+    if (!part.IsEmpty()) {
+      filteredResult.push_back(part);
     }
   }
-
-  std::vector<Manifold> output = Fracture(circumcenters, circumradii);
-  output.insert(output.end(), debugShapes.begin(), debugShapes.end());
-  return output;
+  
+  return filteredResult;
 }
 
 /**

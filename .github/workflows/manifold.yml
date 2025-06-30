@@ -6,9 +6,9 @@ name: CI
 # events but only for the feat-voacd branch
 on:
   push:
-    branches: [ feat-voacd ]
+    branches: [ feat-voacd-tetrahedra ]
   pull_request:
-    branches: [ feat-voacd ]
+    branches: [ feat-voacd-tetrahedra ]
 
 jobs:
   build:

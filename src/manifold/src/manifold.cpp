@@ -1172,8 +1172,8 @@ std::vector<Manifold> Manifold::ConvexDecomposition() const {
 
   // Create a PLC from the input points and triangles
   inputPLC plc;
-  plc.initFromVectors(vertexPositions.data(), vertexPositions.size(), 
-    triangles.data(), triangles.size(), true);
+  plc.initFromVectors(vertexPositions.data(), vertexPositions.size()/3, 
+    triangles.data(), triangles.size()/3, true);
 
   // Build a delaunay tetrahedrization of the vertices
   TetMesh* tin = new TetMesh;

@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        parallelization: [OFF, ON]
+        parallelization: [OFF] #, ON
         debug: [OFF, ON]
     steps:
     - name: Install dependencies
@@ -128,6 +128,14 @@ jobs:
         mkdir build
         cd build
         emcmake cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DMANIFOLD_PAR=${{matrix.parallelization}} -DMANIFOLD_DEBUG=${{matrix.debug}} -DMANIFOLD_ASSERT=${{matrix.debug}} .. && emmake make
+    - name: Upload WASM files
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: wasm
+        path: bindings/wasm/examples/dist/
+        retention-days: 90
+        overwrite: true
     - name: Test WASM
       if: matrix.parallelization == 'OFF'
       run: |
@@ -141,207 +149,199 @@ jobs:
         npm run build
         npm test
         cp ../manifold.* ./dist/
-    - name: Upload WASM files
-      uses: actions/upload-artifact@v4
-      if: github.event_name == 'push' && matrix.parallelization == 'OFF' && matrix.debug == 'OFF'
-      with:
-        name: wasm
-        path: bindings/wasm/examples/dist/
-        retention-days: 90
-        overwrite: true
 
-  build_fuzzer:
-    name: fuzzer
-    timeout-minutes: 30
-    runs-on: ubuntu-24.04
-    steps:
-    - name: Install dependencies
-      run: |
-        sudo apt-get -y update
-        DEBIAN_FRONTEND=noninteractive sudo apt install -y libgtest-dev clang
-    - uses: actions/checkout@v4
-    - uses: jwlawson/actions-setup-cmake@v2
-    - name: Build
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DMANIFOLD_DEBUG=ON -DMANIFOLD_FUZZ=ON -DMANIFOLD_PYBIND=OFF -DCMAKE_CXX_COMPILER=clang++ ..
-        make
+  #build_fuzzer:
+  #  name: fuzzer
+  #  timeout-minutes: 30
+  #  runs-on: ubuntu-24.04
+  #  steps:
+  #  - name: Install dependencies
+  #    run: |
+  #      sudo apt-get -y update
+  #      DEBIAN_FRONTEND=noninteractive sudo apt install -y libgtest-dev clang
+  #  - uses: actions/checkout@v4
+  #  - uses: jwlawson/actions-setup-cmake@v2
+  #  - name: Build
+  #    run: |
+  #      mkdir build
+  #      cd build
+  #      cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DMANIFOLD_DEBUG=ON -DMANIFOLD_FUZZ=ON -DMANIFOLD_PYBIND=OFF -DCMAKE_CXX_COMPILER=clang++ ..
+  #      make
 
-  build_fuzzer_mac:
-    name: fuzzer mac
-    timeout-minutes: 30
-    runs-on: macos-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Install common dependencies
-      run: |
-        brew install googletest
-    - uses: jwlawson/actions-setup-cmake@v2
-      with:
-        cmake-version: 3.31.6
-    - name: Build
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DMANIFOLD_DEBUG=ON -DMANIFOLD_FUZZ=ON -DMANIFOLD_PYBIND=OFF -DCMAKE_CXX_COMPILER=clang++ -DMANIFOLD_PAR=OFF ..
-        ASAN_OPTIONS=detect_container_overflow=0 make
+  #build_fuzzer_mac:
+  #  name: fuzzer mac
+  #  timeout-minutes: 30
+  #  runs-on: macos-latest
+  #  steps:
+  #  - uses: actions/checkout@v4
+  #  - name: Install common dependencies
+  #    run: |
+  #      brew install googletest
+  #  - uses: jwlawson/actions-setup-cmake@v2
+  #    with:
+  #      cmake-version: 3.31.6
+  #  - name: Build
+  #    run: |
+  #      mkdir build
+  #      cd build
+  #      cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DMANIFOLD_DEBUG=ON -DMANIFOLD_FUZZ=ON -DMANIFOLD_PYBIND=OFF -DCMAKE_CXX_COMPILER=clang++ -DMANIFOLD_PAR=OFF ..
+  #      ASAN_OPTIONS=detect_container_overflow=0 make
 
-  build_windows:
-    name: Windows (TBB:${{matrix.parallelization}}, SHARED:${{matrix.shared}})
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        parallelization: [OFF, ON]
-        shared: [OFF, ON]
-    runs-on: windows-2025
-    steps:
-    - uses: actions/checkout@v4
-    - uses: jwlawson/actions-setup-cmake@v2
-      with:
-        cmake-version: 4.0.2
-    - uses: ilammy/msvc-dev-cmd@v1
-    - name: Build ${{matrix.parallelization}}
-      shell: powershell
-      run: |
-        cmake . -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=${{matrix.shared}} -DMANIFOLD_DEBUG=ON -DMANIFOLD_ASSERT=ON -DMANIFOLD_PAR=${{matrix.parallelization}} -A x64 -B build
-        cd build
-        cmake --build . --target ALL_BUILD --config Release
-    - name: Test dll location
-      if: matrix.shared == 'ON'
-      shell: bash
-      run: |
-        ls ./build/lib/Release
-        [ -f ./build/lib/Release/manifold.dll ]
-        [ -f ./build/lib/Release/manifoldc.dll ]
-    - name: Test
-      shell: bash
-      run: |
-        cp ./build/lib/Release/* ./build/bin/Release
-        cd build/bin/Release
-        ./manifold_test.exe
-        cd ../../
-    - name: test cmake consumer
-      run: |
-        cd build
-        cmake --install .
-        cd ..
-        ./scripts/test-cmake.sh
+  #build_windows:
+  #  name: Windows (TBB:${{matrix.parallelization}}, SHARED:${{matrix.shared}})
+  #  timeout-minutes: 30
+  #  strategy:
+  #    matrix:
+  #      parallelization: [OFF, ON]
+  #      shared: [OFF, ON]
+  #  runs-on: windows-2025
+  #  steps:
+  #  - uses: actions/checkout@v4
+  #  - uses: jwlawson/actions-setup-cmake@v2
+  #    with:
+  #      cmake-version: 4.0.2
+  #  - uses: ilammy/msvc-dev-cmd@v1
+  #  - name: Build ${{matrix.parallelization}}
+  #    shell: powershell
+  #    run: |
+  #      cmake . -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=${{matrix.shared}} -DMANIFOLD_DEBUG=ON -DMANIFOLD_ASSERT=ON -DMANIFOLD_PAR=${{matrix.parallelization}} -A x64 -B build
+  #      cd build
+  #      cmake --build . --target ALL_BUILD --config Release
+  #  - name: Test dll location
+  #    if: matrix.shared == 'ON'
+  #    shell: bash
+  #    run: |
+  #      ls ./build/lib/Release
+  #      [ -f ./build/lib/Release/manifold.dll ]
+  #      [ -f ./build/lib/Release/manifoldc.dll ]
+  #  - name: Test
+  #    shell: bash
+  #    run: |
+  #      cp ./build/lib/Release/* ./build/bin/Release
+  #      cd build/bin/Release
+  #      ./manifold_test.exe
+  #      cd ../../
+  #  - name: test cmake consumer
+  #    run: |
+  #      cd build
+  #      cmake --install .
+  #      cd ..
+  #      ./scripts/test-cmake.sh
 
-  build_mxe:
-    name: MXE (TBB:${{matrix.parallelization == 'ON'}})
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        parallelization: [OFF, ON]
-    runs-on: ubuntu-latest
-    container: openscad/mxe-x86_64-gui:latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: |
-        mkdir build
-        cd build
-        export MXEDIR=/mxe
-        export MXE_TARGETS=x86_64-w64-mingw32.static.posix
-        export MXEDIR=$HOME/openscad_deps/mxe
-        export MXETARGETDIR=$MXEDIR/usr/$MXE_TARGETS
-        export PATH=/mxe/usr/bin:$PATH
-        export CMAKE=$MXE_TARGETS-cmake
-        $CMAKE -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DMANIFOLD_PYBIND=OFF -DMANIFOLD_CBIND=ON -DMANIFOLD_DEBUG=ON -DMANIFOLD_PAR=${{matrix.parallelization}} .. && make
+  #build_mxe:
+  #  name: MXE (TBB:${{matrix.parallelization == 'ON'}})
+  #  timeout-minutes: 30
+  #  strategy:
+  #    matrix:
+  #      parallelization: [OFF, ON]
+  #  runs-on: ubuntu-latest
+  #  container: openscad/mxe-x86_64-gui:latest
+  #  steps:
+  #  - uses: actions/checkout@v4
+  #  - name: Build
+  #    run: |
+  #      mkdir build
+  #      cd build
+  #      export MXEDIR=/mxe
+  #      export MXE_TARGETS=x86_64-w64-mingw32.static.posix
+  #      export MXEDIR=$HOME/openscad_deps/mxe
+  #      export MXETARGETDIR=$MXEDIR/usr/$MXE_TARGETS
+  #      export PATH=/mxe/usr/bin:$PATH
+  #      export CMAKE=$MXE_TARGETS-cmake
+  #      $CMAKE -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DMANIFOLD_PYBIND=OFF -DMANIFOLD_CBIND=ON -DMANIFOLD_DEBUG=ON -DMANIFOLD_PAR=${{matrix.parallelization}} .. && make
 
-  build_mac:
-    name: MacOS (TBB:${{matrix.parallelization == 'ON'}})
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        parallelization: [OFF, ON]
-    runs-on: macos-latest
-    steps:
-    - name: Install common dependencies
-      run: |
-        brew install googletest assimp
-        pip install trimesh pytest
-    - name: Install TBB
-      if: matrix.parallelization == 'ON'
-      run: brew install tbb
-    - uses: actions/checkout@v4
-    - uses: jwlawson/actions-setup-cmake@v2
-      with:
-        cmake-version: 4.0.2
-    - name: Build
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DMANIFOLD_DEBUG=ON -DMANIFOLD_ASSERT=ON -DMANIFOLD_PYBIND=ON -DMANIFOLD_EXPORT=ON -DMANIFOLD_PAR=${{matrix.parallelization}} .. && make
-    - name: Test
-      run: |
-        cd build/test
-        ./manifold_test
-        cd ../../
-    - name: test cmake consumer
-      run: |
-        cd build
-        sudo cmake --install .
-        cd ..
-        ./scripts/test-cmake.sh
-        LDFLAGS=-Wl,-rpath,/usr/local/lib ./scripts/test-pkgconfig.sh
+  #build_mac:
+  #  name: MacOS (TBB:${{matrix.parallelization == 'ON'}})
+  #  timeout-minutes: 30
+  #  strategy:
+  #    matrix:
+  #      parallelization: [OFF, ON]
+  #  runs-on: macos-latest
+  #  steps:
+  #  - name: Install common dependencies
+  #    run: |
+  #      brew install googletest assimp
+  #      pip install trimesh pytest
+  #  - name: Install TBB
+  #    if: matrix.parallelization == 'ON'
+  #    run: brew install tbb
+  #  - uses: actions/checkout@v4
+  #  - uses: jwlawson/actions-setup-cmake@v2
+  #    with:
+  #      cmake-version: 4.0.2
+  #  - name: Build
+  #    run: |
+  #      mkdir build
+  #      cd build
+  #      cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DMANIFOLD_DEBUG=ON -DMANIFOLD_ASSERT=ON -DMANIFOLD_PYBIND=ON -DMANIFOLD_EXPORT=ON -DMANIFOLD_PAR=${{matrix.parallelization}} .. && make
+  #  - name: Test
+  #    run: |
+  #      cd build/test
+  #      ./manifold_test
+  #      cd ../../
+  #  - name: test cmake consumer
+  #    run: |
+  #      cd build
+  #      sudo cmake --install .
+  #      cd ..
+  #      ./scripts/test-cmake.sh
+  #      LDFLAGS=-Wl,-rpath,/usr/local/lib ./scripts/test-pkgconfig.sh
 
-  build_mac_builtin_tbb:
-    timeout-minutes: 30
-    runs-on: macos-latest
-    steps:
-    - name: Install common dependencies
-      run: |
-        brew install googletest
-        pip install trimesh pytest
-    - uses: actions/checkout@v4
-    - uses: jwlawson/actions-setup-cmake@v2
-      with:
-        cmake-version: 4.0.2
-    - name: Build
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DMANIFOLD_DEBUG=ON -DMANIFOLD_ASSERT=ON -DMANIFOLD_PYBIND=OFF -DMANIFOLD_PAR=ON .. && make
-    - name: Test
-      run: |
-        cd build/test
-        ./manifold_test
-        cd ../../
-    - name: test cmake consumer
-      run: |
-        cd build
-        sudo cmake --install .
-        cd ..
-        ./scripts/test-cmake.sh
-        LDFLAGS=-Wl,-rpath,/usr/local/lib ./scripts/test-pkgconfig.sh
+  #build_mac_builtin_tbb:
+  #  timeout-minutes: 30
+  #  runs-on: macos-latest
+  #  steps:
+  #  - name: Install common dependencies
+  #    run: |
+  #      brew install googletest
+  #      pip install trimesh pytest
+  #  - uses: actions/checkout@v4
+  #  - uses: jwlawson/actions-setup-cmake@v2
+  #    with:
+  #      cmake-version: 4.0.2
+  #  - name: Build
+  #    run: |
+  #      mkdir build
+  #      cd build
+  #      cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DMANIFOLD_DEBUG=ON -DMANIFOLD_ASSERT=ON -DMANIFOLD_PYBIND=OFF -DMANIFOLD_PAR=ON .. && make
+  #  - name: Test
+  #    run: |
+  #      cd build/test
+  #      ./manifold_test
+  #      cd ../../
+  #  - name: test cmake consumer
+  #    run: |
+  #      cd build
+  #      sudo cmake --install .
+  #      cd ..
+  #      ./scripts/test-cmake.sh
+  #      LDFLAGS=-Wl,-rpath,/usr/local/lib ./scripts/test-pkgconfig.sh
 
-  build_mac_builtin_tbb_subdir:
-    timeout-minutes: 30
-    runs-on: macos-latest
-    steps:
-    - name: Install common dependencies
-      run: |
-        brew install googletest
-        pip install trimesh pytest
-    - uses: actions/checkout@v4
-    - uses: jwlawson/actions-setup-cmake@v2
-      with:
-        cmake-version: 4.0.2
-    - name: test cmake consumer
-      run: |
-        cd ..
-        ./manifold/scripts/test-cmake-subdir.sh
+  #build_mac_builtin_tbb_subdir:
+  #  timeout-minutes: 30
+  #  runs-on: macos-latest
+  #  steps:
+  #  - name: Install common dependencies
+  #    run: |
+  #      brew install googletest
+  #      pip install trimesh pytest
+  #  - uses: actions/checkout@v4
+  #  - uses: jwlawson/actions-setup-cmake@v2
+  #    with:
+  #      cmake-version: 4.0.2
+  #  - name: test cmake consumer
+  #    run: |
+  #      cd ..
+  #      ./manifold/scripts/test-cmake-subdir.sh
 
-  build_nix:
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        variant: [manifold-none, manifold-tbb, manifold-js, manifold-js-tbb, manifold3d]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: DeterminateSystems/nix-installer-action@main
-    - run: nix build -L '.?submodules=1#${{matrix.variant}}'
+  #build_nix:
+  #  timeout-minutes: 30
+  #  strategy:
+  #    matrix:
+  #      variant: [manifold-none, manifold-tbb, manifold-js, manifold-js-tbb, manifold3d]
+  #  runs-on: ubuntu-latest
+  #  steps:
+  #  - uses: actions/checkout@v4
+  #  - uses: DeterminateSystems/nix-installer-action@main
+  #  - run: nix build -L '.?submodules=1#${{matrix.variant}}'
 

@@ -31,8 +31,6 @@ target_link_options(
     --bind
     -sALLOW_TABLE_GROWTH=1
     -sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction
-    -sMODULARIZE=1
-    -sEXPORT_ES6=1
 )
 
 set_target_properties(manifoldjs PROPERTIES OUTPUT_NAME "manifold")

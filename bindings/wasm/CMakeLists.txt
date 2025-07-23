@@ -33,7 +33,7 @@ target_link_options(
     -sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction
     -sMODULARIZE=1
     -sEXPORT_ES6=1
-    -sENVIRONMENT=web
+    -sENVIRONMENT=web,worker
     -sDYNAMIC_EXECUTION=0
 )
 

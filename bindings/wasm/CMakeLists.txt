@@ -33,6 +33,9 @@ target_link_options(
     -sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction
     -sMODULARIZE=1
     -sEXPORT_ES6=1
+    -sclosure=0
+    -sg
+    -slexports.js
 )
 
 set_target_properties(manifoldjs PROPERTIES OUTPUT_NAME "manifold")

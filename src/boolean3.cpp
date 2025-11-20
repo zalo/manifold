@@ -74,13 +74,14 @@ inline bool Shadows(double p, double q, double dir) {
   return p == q ? dir < 0 : p < q;
 }
 
-// Helper function to get the maximum directional component from all face
-// normals connected to a vertex. hintEdge should be a halfedge that either
-// starts or ends at vert (used to avoid searching for a starting halfedge).
-inline double GetMaxFaceNormalComponent(int vert, int hintEdge,
-                                        VecView<const Halfedge> halfedge,
-                                        VecView<const vec3> faceNormal,
-                                        int component) {
+// Helper function to compute the weighted average normal component from all
+// face normals connected to a vertex. This mimics the vertex normal
+// calculation in impl.cpp but returns just the specified component.
+// hintEdge should be a halfedge that either starts or ends at vert.
+inline double GetWeightedFaceNormalComponent(
+    int vert, int hintEdge, VecView<const Halfedge> halfedge,
+    VecView<const vec3> vertPos, VecView<const vec3> faceNormal,
+    int component) {
   // Find a halfedge that starts at vert
   int startEdge = -1;
 
@@ -110,9 +111,7 @@ inline double GetMaxFaceNormalComponent(int vert, int hintEdge,
 
   if (startEdge == -1) return 0.0;  // Vertex not found
 
-  double maxVal = 0.0;  // Default to 0 if no faces found
-  double maxAbsVal = 0.0;
-
+  vec3 weightedNormal = vec3(0.0);
   int current = startEdge;
   int iterations = 0;
   const int maxIterations = 100;  // Safety limit: max faces per vertex
@@ -122,13 +121,22 @@ inline double GetMaxFaceNormalComponent(int vert, int hintEdge,
 
     int faceIdx = current / 3;
     if (faceIdx >= 0 && faceIdx < static_cast<int>(faceNormal.size())) {
-      const vec3& normal = faceNormal[faceIdx];
-      double val = normal[component];
-      double absVal = std::abs(val);
-      // Use the value with maximum absolute magnitude
-      if (absVal > maxAbsVal) {
-        maxAbsVal = absVal;
-        maxVal = val;
+      // Compute the angle weight for this face (same as impl.cpp:738-751)
+      int nextEdge = NextHalfedge(current);
+      ivec3 triVerts = {halfedge[current].startVert,
+                        halfedge[current].endVert,
+                        halfedge[nextEdge].endVert};
+
+      vec3 currEdge =
+          la::normalize(vertPos[triVerts[1]] - vertPos[triVerts[0]]);
+      vec3 prevEdge =
+          la::normalize(vertPos[triVerts[0]] - vertPos[triVerts[2]]);
+
+      // Skip degenerate triangles
+      if (la::isfinite(currEdge[0]) && la::isfinite(prevEdge[0])) {
+        double dot = -la::dot(prevEdge, currEdge);
+        double phi = dot >= 1 ? 0 : (dot <= -1 ? kPi : std::acos(dot));
+        weightedNormal += phi * faceNormal[faceIdx];
       }
     }
 
@@ -140,7 +148,9 @@ inline double GetMaxFaceNormalComponent(int vert, int hintEdge,
       break;  // Invalid
   } while (current != startEdge);
 
-  return maxVal;
+  // Normalize and return the requested component
+  vec3 normalized = SafeNormalize(weightedNormal);
+  return normalized[component];
 }
 
 inline std::pair<int, vec2> Shadow01(
@@ -157,10 +167,12 @@ inline std::pair<int, vec2> Shadow01(
 
   // Use face normals instead of vertex normals for symbolic perturbation
   // Each vertex uses face normals from its own mesh
-  double p0_nx =
-      GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 0);
-  double q1s_nx = GetMaxFaceNormalComponent(q1s, q1, halfedgeQ, faceNormalQ, 0);
-  double q1e_nx = GetMaxFaceNormalComponent(q1e, q1, halfedgeQ, faceNormalQ, 0);
+  double p0_nx = GetWeightedFaceNormalComponent(p0, p0Hint, halfedgeP, vertPosP,
+                                                  faceNormalP, 0);
+  double q1s_nx = GetWeightedFaceNormalComponent(q1s, q1, halfedgeQ, vertPosQ,
+                                                   faceNormalQ, 0);
+  double q1e_nx = GetWeightedFaceNormalComponent(q1e, q1, halfedgeQ, vertPosQ,
+                                                   faceNormalQ, 0);
 
   int s01 = reverse ? Shadows(q1sx, p0x, expandP * q1s_nx) -
                           Shadows(q1ex, p0x, expandP * q1e_nx)
@@ -176,13 +188,14 @@ inline std::pair<int, vec2> Shadow01(
       diff = vertPosQ[q1e] - vertPosP[p0];
       const double end2 = la::dot(diff, diff);
       const double dir =
-          start2 < end2
-              ? GetMaxFaceNormalComponent(q1s, q1, halfedgeQ, faceNormalQ, 1)
-              : GetMaxFaceNormalComponent(q1e, q1, halfedgeQ, faceNormalQ, 1);
+          start2 < end2 ? GetWeightedFaceNormalComponent(q1s, q1, halfedgeQ,
+                                                           vertPosQ, faceNormalQ, 1)
+                        : GetWeightedFaceNormalComponent(q1e, q1, halfedgeQ,
+                                                           vertPosQ, faceNormalQ, 1);
       if (!Shadows(yz01[0], vertPosP[p0].y, expandP * dir)) s01 = 0;
     } else {
-      double p0_ny =
-          GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 1);
+      double p0_ny = GetWeightedFaceNormalComponent(p0, p0Hint, halfedgeP,
+                                                      vertPosP, faceNormalP, 1);
       if (!Shadows(vertPosP[p0].y, yz01[0], expandP * p0_ny)) s01 = 0;
     }
   }
@@ -258,9 +271,10 @@ struct Kernel11 {
       const double end2 = la::dot(diff, diff);
       // Use face normals for the z-component perturbation
       const double dir =
-          start2 < end2
-              ? GetMaxFaceNormalComponent(p1s, p1, halfedgeP, faceNormalP, 2)
-              : GetMaxFaceNormalComponent(p1e, p1, halfedgeP, faceNormalP, 2);
+          start2 < end2 ? GetWeightedFaceNormalComponent(p1s, p1, halfedgeP,
+                                                           vertPosP, faceNormalP, 2)
+                        : GetWeightedFaceNormalComponent(p1e, p1, halfedgeP,
+                                                           vertPosP, faceNormalP, 2);
 
       if (!Shadows(xyzz11.z, xyzz11.w, expandP * dir)) s11 = 0;
     }
@@ -333,14 +347,14 @@ struct Kernel02 {
       vec3 vertPos = vertPosP[p0];
       z02 = Interpolate(yzzRL[0], yzzRL[1], vertPos.y)[1];
       if (forward) {
-        double p0_nz =
-            GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 2);
+        double p0_nz = GetWeightedFaceNormalComponent(p0, p0Hint, halfedgeP,
+                                                        vertPosP, faceNormalP, 2);
         if (!Shadows(vertPos.z, z02, expandP * p0_nz)) s02 = 0;
       } else {
         // DEBUG_ASSERT(closestVert != -1, topologyErr, "No closest vert");
         if (closestVert != -1) {
-          double closestVert_nz = GetMaxFaceNormalComponent(
-              closestVert, closestEdge, halfedgeQ, faceNormalQ, 2);
+          double closestVert_nz = GetWeightedFaceNormalComponent(
+              closestVert, closestEdge, halfedgeQ, vertPosQ, faceNormalQ, 2);
           if (!Shadows(z02, vertPos.z, expandP * closestVert_nz)) s02 = 0;
         }
       }

@@ -115,10 +115,10 @@ inline double GetMaxFaceNormalComponent(int vert, int hintEdge,
 
   int current = startEdge;
   int iterations = 0;
-  const int maxIterations = halfedge.size() + 1;  // Safety limit
+  const int maxIterations = 100;  // Safety limit: max faces per vertex
 
   do {
-    if (iterations++ > maxIterations) break;  // Prevent infinite loop
+    if (++iterations > maxIterations) break;  // Prevent infinite loop
 
     int faceIdx = current / 3;
     if (faceIdx >= 0 && faceIdx < static_cast<int>(faceNormal.size())) {
@@ -490,10 +490,11 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   const Manifold::Impl& a = forward ? inP : inQ;
   const Manifold::Impl& b = forward ? inQ : inP;
 
-  // Note: a and b may be swapped from inP/inQ depending on forward flag
-  // but faceNormals are always from inP and inQ
-  Kernel02 k02{a.vertPos_, a.halfedge_,     b.halfedge_,     b.vertPos_,
-               expandP,    inP.faceNormal_, inQ.faceNormal_, forward};
+  // Note: a and b may be swapped from inP/inQ depending on forward flag.
+  // The faceNormals passed to Kernel02 should correspond to the halfedges being used:
+  // when a == inP, use inP.faceNormal_; when a == inQ, use inQ.faceNormal_.
+  Kernel02 k02{a.vertPos_, a.halfedge_,   b.halfedge_,   b.vertPos_,
+               expandP,    a.faceNormal_, b.faceNormal_, forward};
   Kernel11 k11{inP.vertPos_, inQ.vertPos_,    inP.halfedge_,  inQ.halfedge_,
                expandP,      inP.faceNormal_, inQ.faceNormal_};
 
@@ -574,8 +575,8 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   for (int c : components) verts.push_back(c);
 
   Vec<int> w03(a.NumVert(), 0);
-  Kernel02 k02{a.vertPos_, a.halfedge_,     b.halfedge_,     b.vertPos_,
-               expandP,    inP.faceNormal_, inQ.faceNormal_, forward};
+  Kernel02 k02{a.vertPos_, a.halfedge_,   b.halfedge_,   b.vertPos_,
+               expandP,    a.faceNormal_, b.faceNormal_, forward};
 
   // Pre-compute hint edges for each vertex (find first edge that starts at
   // vertex)
@@ -589,7 +590,7 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
 
   auto recorderf = [&](int i, int b) {
     int hintEdge = vertToEdge[verts[i]];
-    if (hintEdge == -1) hintEdge = 0;  // Fallback
+    // No fallback: leave hintEdge as -1 if no valid edge exists
     const auto [s02, z02] = k02(verts[i], hintEdge, b);
     if (std::isfinite(z02)) w03[verts[i]] += s02 * (!forward ? -1 : 1);
   };

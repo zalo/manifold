@@ -74,19 +74,120 @@ inline bool Shadows(double p, double q, double dir) {
   return p == q ? dir < 0 : p < q;
 }
 
+// Helper function to iterate over all face normals connected to a vertex
+// and compute the maximum shadow value
+template <typename ShadowFunc>
+inline int MaxShadowOverFaces(int vert, VecView<const int> vertHalfedge,
+                              VecView<const Halfedge> halfedge,
+                              VecView<const vec3> faceNormal,
+                              ShadowFunc shadowFunc) {
+  // Bounds checking
+  if (vert < 0 || vert >= static_cast<int>(vertHalfedge.size())) return 0;
+
+  const int firstEdge = vertHalfedge[vert];
+  if (firstEdge < 0 || firstEdge >= static_cast<int>(halfedge.size()))
+    return 0;  // vertex not referenced or invalid
+
+  const int firstFace = firstEdge / 3;
+  if (firstFace >= static_cast<int>(faceNormal.size())) return 0;
+
+  // Compute shadow for first face
+  int maxShadow = shadowFunc(faceNormal[firstFace]);
+  int current = NextHalfedge(halfedge[firstEdge].pairedHalfedge);
+
+  // Limit iterations to prevent infinite loops
+  int iterCount = 0;
+  const int maxIter = static_cast<int>(halfedge.size());
+
+  while (current != firstEdge && iterCount < maxIter) {
+    if (current < 0 || current >= static_cast<int>(halfedge.size())) break;
+    const int face = current / 3;
+    if (face >= static_cast<int>(faceNormal.size())) break;
+
+    // Compute shadow for this face and take maximum
+    int shadow = shadowFunc(faceNormal[face]);
+    maxShadow = std::max(maxShadow, shadow);
+
+    current = NextHalfedge(halfedge[current].pairedHalfedge);
+    iterCount++;
+  }
+
+  return maxShadow;
+}
+
+// Helper to get maximum component (for Y/Z direction checks)
+inline double MaxFaceNormalComponent(int vert, int component,
+                                     VecView<const int> vertHalfedge,
+                                     VecView<const Halfedge> halfedge,
+                                     VecView<const vec3> faceNormal) {
+  if (vert < 0 || vert >= static_cast<int>(vertHalfedge.size())) return 0.0;
+  const int firstEdge = vertHalfedge[vert];
+  if (firstEdge < 0 || firstEdge >= static_cast<int>(halfedge.size()))
+    return 0.0;
+  const int firstFace = firstEdge / 3;
+  if (firstFace >= static_cast<int>(faceNormal.size())) return 0.0;
+
+  double maxVal = faceNormal[firstFace][component];
+  int current = NextHalfedge(halfedge[firstEdge].pairedHalfedge);
+  int iterCount = 0;
+  const int maxIter = static_cast<int>(halfedge.size());
+
+  while (current != firstEdge && iterCount < maxIter) {
+    if (current < 0 || current >= static_cast<int>(halfedge.size())) break;
+    const int face = current / 3;
+    if (face >= static_cast<int>(faceNormal.size())) break;
+    maxVal = std::max(maxVal, faceNormal[face][component]);
+    current = NextHalfedge(halfedge[current].pairedHalfedge);
+    iterCount++;
+  }
+
+  return maxVal;
+}
+
 inline std::pair<int, vec2> Shadow01(
     const int p0, const int q1, VecView<const vec3> vertPosP,
-    VecView<const vec3> vertPosQ, VecView<const Halfedge> halfedgeQ,
-    const double expandP, VecView<const vec3> normal, const bool reverse) {
+    VecView<const vec3> vertPosQ, VecView<const Halfedge> halfedgeP,
+    VecView<const Halfedge> halfedgeQ, const double expandP,
+    VecView<const vec3> faceNormalP, VecView<const vec3> faceNormalQ,
+    VecView<const int> vertHalfedgeP, VecView<const int> vertHalfedgeQ,
+    const bool reverse) {
   const int q1s = halfedgeQ[q1].startVert;
   const int q1e = halfedgeQ[q1].endVert;
   const double p0x = vertPosP[p0].x;
   const double q1sx = vertPosQ[q1s].x;
   const double q1ex = vertPosQ[q1e].x;
-  int s01 = reverse ? Shadows(q1sx, p0x, expandP * normal[q1s].x) -
-                          Shadows(q1ex, p0x, expandP * normal[q1e].x)
-                    : Shadows(p0x, q1ex, expandP * normal[p0].x) -
-                          Shadows(p0x, q1sx, expandP * normal[p0].x);
+
+  int s01 = 0;
+  if (reverse) {
+    // For reverse case, we need to try face normals from q1s and q1e
+    // Since they are different vertices, we need to check both sets and take
+    // maximum Try q1s face normals for the start shadow
+    int maxS01_fromStart = MaxShadowOverFaces(
+        q1s, vertHalfedgeQ, halfedgeQ, faceNormalQ, [&](const vec3& normalS) {
+          // Get corresponding normal from q1e - use max component approach
+          const double dirE = MaxFaceNormalComponent(q1e, 0, vertHalfedgeQ,
+                                                     halfedgeQ, faceNormalQ);
+          return static_cast<int>(Shadows(q1sx, p0x, expandP * normalS.x)) -
+                 static_cast<int>(Shadows(q1ex, p0x, expandP * dirE));
+        });
+    // Try q1e face normals for the end shadow
+    int maxS01_fromEnd = MaxShadowOverFaces(
+        q1e, vertHalfedgeQ, halfedgeQ, faceNormalQ, [&](const vec3& normalE) {
+          // Get corresponding normal from q1s - use max component approach
+          const double dirS = MaxFaceNormalComponent(q1s, 0, vertHalfedgeQ,
+                                                     halfedgeQ, faceNormalQ);
+          return static_cast<int>(Shadows(q1sx, p0x, expandP * dirS)) -
+                 static_cast<int>(Shadows(q1ex, p0x, expandP * normalE.x));
+        });
+    s01 = std::max(maxS01_fromStart, maxS01_fromEnd);
+  } else {
+    // Compute shadow difference for each face normal, take maximum
+    s01 = MaxShadowOverFaces(
+        p0, vertHalfedgeP, halfedgeP, faceNormalP, [&](const vec3& normal) {
+          return static_cast<int>(Shadows(p0x, q1ex, expandP * normal.x)) -
+                 static_cast<int>(Shadows(p0x, q1sx, expandP * normal.x));
+        });
+  }
   vec2 yz01(NAN);
 
   if (s01 != 0) {
@@ -96,10 +197,15 @@ inline std::pair<int, vec2> Shadow01(
       const double start2 = la::dot(diff, diff);
       diff = vertPosQ[q1e] - vertPosP[p0];
       const double end2 = la::dot(diff, diff);
-      const double dir = start2 < end2 ? normal[q1s].y : normal[q1e].y;
+      const bool useStart = start2 < end2;
+      const int vert = useStart ? q1s : q1e;
+      const double dir = MaxFaceNormalComponent(vert, 1, vertHalfedgeQ,
+                                                halfedgeQ, faceNormalQ);
       if (!Shadows(yz01[0], vertPosP[p0].y, expandP * dir)) s01 = 0;
     } else {
-      if (!Shadows(vertPosP[p0].y, yz01[0], expandP * normal[p0].y)) s01 = 0;
+      const double dir =
+          MaxFaceNormalComponent(p0, 1, vertHalfedgeP, halfedgeP, faceNormalP);
+      if (!Shadows(vertPosP[p0].y, yz01[0], expandP * dir)) s01 = 0;
     }
   }
   return std::make_pair(s01, yz01);
@@ -111,7 +217,10 @@ struct Kernel11 {
   VecView<const Halfedge> halfedgeP;
   VecView<const Halfedge> halfedgeQ;
   const double expandP;
-  VecView<const vec3> normalP;
+  VecView<const vec3> faceNormalP;
+  VecView<const vec3> faceNormalQ;
+  VecView<const int> vertHalfedgeP;
+  VecView<const int> vertHalfedgeQ;
 
   std::pair<int, vec4> operator()(int p1, int q1) {
     vec4 xyzz11 = vec4(NAN);
@@ -127,8 +236,9 @@ struct Kernel11 {
 
     const int p0[2] = {halfedgeP[p1].startVert, halfedgeP[p1].endVert};
     for (int i : {0, 1}) {
-      const auto [s01, yz01] = Shadow01(p0[i], q1, vertPosP, vertPosQ,
-                                        halfedgeQ, expandP, normalP, false);
+      const auto [s01, yz01] = Shadow01(
+          p0[i], q1, vertPosP, vertPosQ, halfedgeP, halfedgeQ, expandP,
+          faceNormalP, faceNormalQ, vertHalfedgeP, vertHalfedgeQ, false);
       // If the value is NaN, then these do not overlap.
       if (std::isfinite(yz01[0])) {
         s11 += s01 * (i == 0 ? -1 : 1);
@@ -143,8 +253,9 @@ struct Kernel11 {
 
     const int q0[2] = {halfedgeQ[q1].startVert, halfedgeQ[q1].endVert};
     for (int i : {0, 1}) {
-      const auto [s10, yz10] = Shadow01(q0[i], p1, vertPosQ, vertPosP,
-                                        halfedgeP, expandP, normalP, true);
+      const auto [s10, yz10] = Shadow01(
+          q0[i], p1, vertPosQ, vertPosP, halfedgeQ, halfedgeP, expandP,
+          faceNormalQ, faceNormalP, vertHalfedgeQ, vertHalfedgeP, true);
       // If the value is NaN, then these do not overlap.
       if (std::isfinite(yz10[0])) {
         s11 += s10 * (i == 0 ? -1 : 1);
@@ -169,7 +280,9 @@ struct Kernel11 {
       const double start2 = la::dot(diff, diff);
       diff = vertPosP[p1e] - vec3(xyzz11);
       const double end2 = la::dot(diff, diff);
-      const double dir = start2 < end2 ? normalP[p1s].z : normalP[p1e].z;
+      const int vert = start2 < end2 ? p1s : p1e;
+      const double dir = MaxFaceNormalComponent(vert, 2, vertHalfedgeP,
+                                                halfedgeP, faceNormalP);
 
       if (!Shadows(xyzz11.z, xyzz11.w, expandP * dir)) s11 = 0;
     }
@@ -180,10 +293,14 @@ struct Kernel11 {
 
 struct Kernel02 {
   VecView<const vec3> vertPosP;
+  VecView<const Halfedge> halfedgeP;
   VecView<const Halfedge> halfedgeQ;
   VecView<const vec3> vertPosQ;
   const double expandP;
-  VecView<const vec3> vertNormalP;
+  VecView<const vec3> faceNormalP;
+  VecView<const vec3> faceNormalQ;
+  VecView<const int> vertHalfedgeP;
+  VecView<const int> vertHalfedgeQ;
   const bool forward;
 
   std::pair<int, double> operator()(int p0, int q2) {
@@ -216,8 +333,9 @@ struct Kernel02 {
         }
       }
 
-      const auto syz01 = Shadow01(p0, q1F, vertPosP, vertPosQ, halfedgeQ,
-                                  expandP, vertNormalP, !forward);
+      const auto syz01 = Shadow01(p0, q1F, vertPosP, vertPosQ, halfedgeP,
+                                  halfedgeQ, expandP, faceNormalP, faceNormalQ,
+                                  vertHalfedgeP, vertHalfedgeQ, !forward);
       const int s01 = syz01.first;
       const vec2 yz01 = syz01.second;
       // If the value is NaN, then these do not overlap.
@@ -237,11 +355,14 @@ struct Kernel02 {
       vec3 vertPos = vertPosP[p0];
       z02 = Interpolate(yzzRL[0], yzzRL[1], vertPos.y)[1];
       if (forward) {
-        if (!Shadows(vertPos.z, z02, expandP * vertNormalP[p0].z)) s02 = 0;
+        const double dir = MaxFaceNormalComponent(p0, 2, vertHalfedgeP,
+                                                  halfedgeP, faceNormalP);
+        if (!Shadows(vertPos.z, z02, expandP * dir)) s02 = 0;
       } else {
         // DEBUG_ASSERT(closestVert != -1, topologyErr, "No closest vert");
-        if (!Shadows(z02, vertPos.z, expandP * vertNormalP[closestVert].z))
-          s02 = 0;
+        const double dir = MaxFaceNormalComponent(closestVert, 2, vertHalfedgeQ,
+                                                  halfedgeQ, faceNormalQ);
+        if (!Shadows(z02, vertPos.z, expandP * dir)) s02 = 0;
       }
     }
     return std::make_pair(s02, z02);
@@ -389,10 +510,29 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   const Manifold::Impl& a = forward ? inP : inQ;
   const Manifold::Impl& b = forward ? inQ : inP;
 
-  Kernel02 k02{a.vertPos_, b.halfedge_,     b.vertPos_,
-               expandP,    inP.vertNormal_, forward};
-  Kernel11 k11{inP.vertPos_,  inQ.vertPos_, inP.halfedge_,
-               inQ.halfedge_, expandP,      inP.vertNormal_};
+  // Create vertex-to-halfedge mappings (sanitize uninitialized values)
+  Vec<int> vertHalfedgeP = inP.VertHalfedge();
+  Vec<int> vertHalfedgeQ = inQ.VertHalfedge();
+  // Sanitize any invalid entries
+  for (size_t i = 0; i < vertHalfedgeP.size(); ++i) {
+    if (vertHalfedgeP[i] < 0 ||
+        vertHalfedgeP[i] >= static_cast<int>(inP.halfedge_.size())) {
+      vertHalfedgeP[i] = -1;
+    }
+  }
+  for (size_t i = 0; i < vertHalfedgeQ.size(); ++i) {
+    if (vertHalfedgeQ[i] < 0 ||
+        vertHalfedgeQ[i] >= static_cast<int>(inQ.halfedge_.size())) {
+      vertHalfedgeQ[i] = -1;
+    }
+  }
+
+  Kernel02 k02{a.vertPos_,    a.halfedge_,     b.halfedge_,     b.vertPos_,
+               expandP,       inP.faceNormal_, inQ.faceNormal_, vertHalfedgeP,
+               vertHalfedgeQ, forward};
+  Kernel11 k11{inP.vertPos_,    inQ.vertPos_,  inP.halfedge_,
+               inQ.halfedge_,   expandP,       inP.faceNormal_,
+               inQ.faceNormal_, vertHalfedgeP, vertHalfedgeQ};
 
   Kernel12 k12{a.halfedge_, b.halfedge_, a.vertPos_, forward, k02, k11};
   Kernel12Recorder recorder{k12, forward, {}};
@@ -470,9 +610,27 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   verts.reserve(components.size());
   for (int c : components) verts.push_back(c);
 
+  // Create vertex-to-halfedge mappings (sanitize uninitialized values)
+  Vec<int> vertHalfedgeP = inP.VertHalfedge();
+  Vec<int> vertHalfedgeQ = inQ.VertHalfedge();
+  // Sanitize any invalid entries
+  for (size_t i = 0; i < vertHalfedgeP.size(); ++i) {
+    if (vertHalfedgeP[i] < 0 ||
+        vertHalfedgeP[i] >= static_cast<int>(inP.halfedge_.size())) {
+      vertHalfedgeP[i] = -1;
+    }
+  }
+  for (size_t i = 0; i < vertHalfedgeQ.size(); ++i) {
+    if (vertHalfedgeQ[i] < 0 ||
+        vertHalfedgeQ[i] >= static_cast<int>(inQ.halfedge_.size())) {
+      vertHalfedgeQ[i] = -1;
+    }
+  }
+
   Vec<int> w03(a.NumVert(), 0);
-  Kernel02 k02{a.vertPos_, b.halfedge_,     b.vertPos_,
-               expandP,    inP.vertNormal_, forward};
+  Kernel02 k02{a.vertPos_,    a.halfedge_,     b.halfedge_,     b.vertPos_,
+               expandP,       inP.faceNormal_, inQ.faceNormal_, vertHalfedgeP,
+               vertHalfedgeQ, forward};
   auto recorderf = [&](int i, int b) {
     const auto [s02, z02] = k02(verts[i], b);
     if (std::isfinite(z02)) w03[verts[i]] += s02 * (!forward ? -1 : 1);

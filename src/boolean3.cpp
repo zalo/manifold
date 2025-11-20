@@ -81,9 +81,10 @@ inline double MaxFaceNormalComponent(int vert, int component,
                                      VecView<const Halfedge> halfedge,
                                      VecView<const vec3> faceNormal) {
   if (vert < 0 || static_cast<size_t>(vert) >= vertHalfedge.size()) return 0.0;
-  
+
   const int firstEdge = vertHalfedge[vert];
-  if (firstEdge < 0 || static_cast<size_t>(firstEdge) >= halfedge.size()) return 0.0;  // vertex not referenced or invalid index
+  if (firstEdge < 0 || static_cast<size_t>(firstEdge) >= halfedge.size())
+    return 0.0;  // vertex not referenced or invalid index
 
   double maxVal = -std::numeric_limits<double>::infinity();
   int current = firstEdge;
@@ -125,12 +126,15 @@ inline std::pair<int, vec2> Shadow01(
 
   int s01 = 0;
   if (reverse) {
-    const double dirQ1s = MaxFaceNormalComponent(q1s, 0, vertHalfedgeQ, halfedgeQ, faceNormalQ);
-    const double dirQ1e = MaxFaceNormalComponent(q1e, 0, vertHalfedgeQ, halfedgeQ, faceNormalQ);
+    const double dirQ1s =
+        MaxFaceNormalComponent(q1s, 0, vertHalfedgeQ, halfedgeQ, faceNormalQ);
+    const double dirQ1e =
+        MaxFaceNormalComponent(q1e, 0, vertHalfedgeQ, halfedgeQ, faceNormalQ);
     s01 = Shadows(q1sx, p0x, expandP * dirQ1s) -
           Shadows(q1ex, p0x, expandP * dirQ1e);
   } else {
-    const double dirP0 = MaxFaceNormalComponent(p0, 0, vertHalfedgeP, halfedgeP, faceNormalP);
+    const double dirP0 =
+        MaxFaceNormalComponent(p0, 0, vertHalfedgeP, halfedgeP, faceNormalP);
     s01 = Shadows(p0x, q1ex, expandP * dirP0) -
           Shadows(p0x, q1sx, expandP * dirP0);
   }
@@ -460,10 +464,15 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   Vec<int> vertHalfedgeP = inP.VertHalfedge();
   Vec<int> vertHalfedgeQ = inQ.VertHalfedge();
 
-  Kernel02 k02{a.vertPos_,    a.halfedge_,     b.halfedge_,     b.vertPos_,
-               expandP,       a.faceNormal_,   b.faceNormal_,   
+  Kernel02 k02{a.vertPos_,
+               a.halfedge_,
+               b.halfedge_,
+               b.vertPos_,
+               expandP,
+               a.faceNormal_,
+               b.faceNormal_,
                forward ? vertHalfedgeP : vertHalfedgeQ,
-               forward ? vertHalfedgeQ : vertHalfedgeP, 
+               forward ? vertHalfedgeQ : vertHalfedgeP,
                forward};
   Kernel11 k11{inP.vertPos_,    inQ.vertPos_,  inP.halfedge_,
                inQ.halfedge_,   expandP,       inP.faceNormal_,
@@ -550,8 +559,13 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   Vec<int> vertHalfedgeQ = inQ.VertHalfedge();
 
   Vec<int> w03(a.NumVert(), 0);
-  Kernel02 k02{a.vertPos_,    a.halfedge_,     b.halfedge_,     b.vertPos_,
-               expandP,       a.faceNormal_,   b.faceNormal_,   
+  Kernel02 k02{a.vertPos_,
+               a.halfedge_,
+               b.halfedge_,
+               b.vertPos_,
+               expandP,
+               a.faceNormal_,
+               b.faceNormal_,
                forward ? vertHalfedgeP : vertHalfedgeQ,
                forward ? vertHalfedgeQ : vertHalfedgeP,
                forward};

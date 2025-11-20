@@ -74,15 +74,16 @@ inline bool Shadows(double p, double q, double dir) {
   return p == q ? dir < 0 : p < q;
 }
 
-// Helper function to get the maximum directional component from all face normals
-// connected to a vertex. hintEdge should be a halfedge that either starts or ends
-// at vert (used to avoid searching for a starting halfedge).
-inline double GetMaxFaceNormalComponent(
-    int vert, int hintEdge, VecView<const Halfedge> halfedge,
-    VecView<const vec3> faceNormal, int component) {
+// Helper function to get the maximum directional component from all face
+// normals connected to a vertex. hintEdge should be a halfedge that either
+// starts or ends at vert (used to avoid searching for a starting halfedge).
+inline double GetMaxFaceNormalComponent(int vert, int hintEdge,
+                                        VecView<const Halfedge> halfedge,
+                                        VecView<const vec3> faceNormal,
+                                        int component) {
   // Find a halfedge that starts at vert
   int startEdge = -1;
-  
+
   // Try to use the hint if it's valid
   if (hintEdge >= 0 && hintEdge < static_cast<int>(halfedge.size())) {
     if (halfedge[hintEdge].startVert == vert) {
@@ -90,13 +91,13 @@ inline double GetMaxFaceNormalComponent(
     } else if (halfedge[hintEdge].endVert == vert) {
       // hintEdge ends at vert, so use its paired halfedge
       int paired = halfedge[hintEdge].pairedHalfedge;
-      if (paired >= 0 && paired < static_cast<int>(halfedge.size()) && 
+      if (paired >= 0 && paired < static_cast<int>(halfedge.size()) &&
           halfedge[paired].startVert == vert) {
         startEdge = paired;
       }
     }
   }
-  
+
   // If hint didn't work, search for a starting halfedge
   if (startEdge == -1) {
     for (size_t i = 0; i < halfedge.size(); ++i) {
@@ -106,19 +107,19 @@ inline double GetMaxFaceNormalComponent(
       }
     }
   }
-  
+
   if (startEdge == -1) return 0.0;  // Vertex not found
-  
+
   double maxVal = 0.0;  // Default to 0 if no faces found
   double maxAbsVal = 0.0;
-  
+
   int current = startEdge;
   int iterations = 0;
   const int maxIterations = halfedge.size() + 1;  // Safety limit
-  
+
   do {
     if (iterations++ > maxIterations) break;  // Prevent infinite loop
-    
+
     int faceIdx = current / 3;
     if (faceIdx >= 0 && faceIdx < static_cast<int>(faceNormal.size())) {
       const vec3& normal = faceNormal[faceIdx];
@@ -130,13 +131,15 @@ inline double GetMaxFaceNormalComponent(
         maxVal = val;
       }
     }
-    
+
     int paired = halfedge[current].pairedHalfedge;
-    if (paired < 0 || paired >= static_cast<int>(halfedge.size())) break;  // Invalid
+    if (paired < 0 || paired >= static_cast<int>(halfedge.size()))
+      break;  // Invalid
     current = NextHalfedge(paired);
-    if (current < 0 || current >= static_cast<int>(halfedge.size())) break;  // Invalid
+    if (current < 0 || current >= static_cast<int>(halfedge.size()))
+      break;  // Invalid
   } while (current != startEdge);
-  
+
   return maxVal;
 }
 
@@ -151,13 +154,14 @@ inline std::pair<int, vec2> Shadow01(
   const double p0x = vertPosP[p0].x;
   const double q1sx = vertPosQ[q1s].x;
   const double q1ex = vertPosQ[q1e].x;
-  
+
   // Use face normals instead of vertex normals for symbolic perturbation
   // Each vertex uses face normals from its own mesh
-  double p0_nx = GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 0);
+  double p0_nx =
+      GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 0);
   double q1s_nx = GetMaxFaceNormalComponent(q1s, q1, halfedgeQ, faceNormalQ, 0);
   double q1e_nx = GetMaxFaceNormalComponent(q1e, q1, halfedgeQ, faceNormalQ, 0);
-  
+
   int s01 = reverse ? Shadows(q1sx, p0x, expandP * q1s_nx) -
                           Shadows(q1ex, p0x, expandP * q1e_nx)
                     : Shadows(p0x, q1ex, expandP * p0_nx) -
@@ -171,12 +175,14 @@ inline std::pair<int, vec2> Shadow01(
       const double start2 = la::dot(diff, diff);
       diff = vertPosQ[q1e] - vertPosP[p0];
       const double end2 = la::dot(diff, diff);
-      const double dir = start2 < end2 
-          ? GetMaxFaceNormalComponent(q1s, q1, halfedgeQ, faceNormalQ, 1)
-          : GetMaxFaceNormalComponent(q1e, q1, halfedgeQ, faceNormalQ, 1);
+      const double dir =
+          start2 < end2
+              ? GetMaxFaceNormalComponent(q1s, q1, halfedgeQ, faceNormalQ, 1)
+              : GetMaxFaceNormalComponent(q1e, q1, halfedgeQ, faceNormalQ, 1);
       if (!Shadows(yz01[0], vertPosP[p0].y, expandP * dir)) s01 = 0;
     } else {
-      double p0_ny = GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 1);
+      double p0_ny =
+          GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 1);
       if (!Shadows(vertPosP[p0].y, yz01[0], expandP * p0_ny)) s01 = 0;
     }
   }
@@ -206,9 +212,9 @@ struct Kernel11 {
 
     const int p0[2] = {halfedgeP[p1].startVert, halfedgeP[p1].endVert};
     for (int i : {0, 1}) {
-      const auto [s01, yz01] = Shadow01(p0[i], p1, q1, vertPosP, vertPosQ,
-                                        halfedgeP, halfedgeQ, expandP,
-                                        faceNormalP, faceNormalQ, false);
+      const auto [s01, yz01] =
+          Shadow01(p0[i], p1, q1, vertPosP, vertPosQ, halfedgeP, halfedgeQ,
+                   expandP, faceNormalP, faceNormalQ, false);
       // If the value is NaN, then these do not overlap.
       if (std::isfinite(yz01[0])) {
         s11 += s01 * (i == 0 ? -1 : 1);
@@ -223,9 +229,9 @@ struct Kernel11 {
 
     const int q0[2] = {halfedgeQ[q1].startVert, halfedgeQ[q1].endVert};
     for (int i : {0, 1}) {
-      const auto [s10, yz10] = Shadow01(q0[i], q1, p1, vertPosQ, vertPosP,
-                                        halfedgeQ, halfedgeP, expandP,
-                                        faceNormalQ, faceNormalP, true);
+      const auto [s10, yz10] =
+          Shadow01(q0[i], q1, p1, vertPosQ, vertPosP, halfedgeQ, halfedgeP,
+                   expandP, faceNormalQ, faceNormalP, true);
       // If the value is NaN, then these do not overlap.
       if (std::isfinite(yz10[0])) {
         s11 += s10 * (i == 0 ? -1 : 1);
@@ -251,9 +257,10 @@ struct Kernel11 {
       diff = vertPosP[p1e] - vec3(xyzz11);
       const double end2 = la::dot(diff, diff);
       // Use face normals for the z-component perturbation
-      const double dir = start2 < end2 
-          ? GetMaxFaceNormalComponent(p1s, p1, halfedgeP, faceNormalP, 2)
-          : GetMaxFaceNormalComponent(p1e, p1, halfedgeP, faceNormalP, 2);
+      const double dir =
+          start2 < end2
+              ? GetMaxFaceNormalComponent(p1s, p1, halfedgeP, faceNormalP, 2)
+              : GetMaxFaceNormalComponent(p1e, p1, halfedgeP, faceNormalP, 2);
 
       if (!Shadows(xyzz11.z, xyzz11.w, expandP * dir)) s11 = 0;
     }
@@ -304,9 +311,9 @@ struct Kernel02 {
         }
       }
 
-      const auto syz01 = Shadow01(p0, p0Hint, q1F, vertPosP, vertPosQ,
-                                  halfedgeP, halfedgeQ, expandP,
-                                  faceNormalP, faceNormalQ, !forward);
+      const auto syz01 =
+          Shadow01(p0, p0Hint, q1F, vertPosP, vertPosQ, halfedgeP, halfedgeQ,
+                   expandP, faceNormalP, faceNormalQ, !forward);
       const int s01 = syz01.first;
       const vec2 yz01 = syz01.second;
       // If the value is NaN, then these do not overlap.
@@ -326,14 +333,15 @@ struct Kernel02 {
       vec3 vertPos = vertPosP[p0];
       z02 = Interpolate(yzzRL[0], yzzRL[1], vertPos.y)[1];
       if (forward) {
-        double p0_nz = GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 2);
+        double p0_nz =
+            GetMaxFaceNormalComponent(p0, p0Hint, halfedgeP, faceNormalP, 2);
         if (!Shadows(vertPos.z, z02, expandP * p0_nz)) s02 = 0;
       } else {
         // DEBUG_ASSERT(closestVert != -1, topologyErr, "No closest vert");
         if (closestVert != -1) {
-          double closestVert_nz = GetMaxFaceNormalComponent(closestVert, closestEdge, halfedgeQ, faceNormalQ, 2);
-          if (!Shadows(z02, vertPos.z, expandP * closestVert_nz))
-            s02 = 0;
+          double closestVert_nz = GetMaxFaceNormalComponent(
+              closestVert, closestEdge, halfedgeQ, faceNormalQ, 2);
+          if (!Shadows(z02, vertPos.z, expandP * closestVert_nz)) s02 = 0;
         }
       }
     }
@@ -484,10 +492,10 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
 
   // Note: a and b may be swapped from inP/inQ depending on forward flag
   // but faceNormals are always from inP and inQ
-  Kernel02 k02{a.vertPos_, a.halfedge_,     b.halfedge_,    b.vertPos_,
+  Kernel02 k02{a.vertPos_, a.halfedge_,     b.halfedge_,     b.vertPos_,
                expandP,    inP.faceNormal_, inQ.faceNormal_, forward};
-  Kernel11 k11{inP.vertPos_,  inQ.vertPos_, inP.halfedge_,
-               inQ.halfedge_, expandP,      inP.faceNormal_, inQ.faceNormal_};
+  Kernel11 k11{inP.vertPos_, inQ.vertPos_,    inP.halfedge_,  inQ.halfedge_,
+               expandP,      inP.faceNormal_, inQ.faceNormal_};
 
   Kernel12 k12{a.halfedge_, b.halfedge_, a.vertPos_, forward, k02, k11};
   Kernel12Recorder recorder{k12, forward, {}};
@@ -566,10 +574,11 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   for (int c : components) verts.push_back(c);
 
   Vec<int> w03(a.NumVert(), 0);
-  Kernel02 k02{a.vertPos_, a.halfedge_,     b.halfedge_,    b.vertPos_,
+  Kernel02 k02{a.vertPos_, a.halfedge_,     b.halfedge_,     b.vertPos_,
                expandP,    inP.faceNormal_, inQ.faceNormal_, forward};
-  
-  // Pre-compute hint edges for each vertex (find first edge that starts at vertex)
+
+  // Pre-compute hint edges for each vertex (find first edge that starts at
+  // vertex)
   Vec<int> vertToEdge(a.vertPos_.size(), -1);
   for (size_t edge = 0; edge < a.halfedge_.size(); ++edge) {
     int vert = a.halfedge_[edge].startVert;
@@ -577,7 +586,7 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
       vertToEdge[vert] = edge;
     }
   }
-  
+
   auto recorderf = [&](int i, int b) {
     int hintEdge = vertToEdge[verts[i]];
     if (hintEdge == -1) hintEdge = 0;  // Fallback

@@ -385,7 +385,7 @@ Vec<int> Manifold::Impl::VertFlatFace(const Vec<bool>& flatFaces) const {
 }
 
 Vec<int> Manifold::Impl::VertHalfedge() const {
-  Vec<int> vertHalfedge(NumVert());
+  Vec<int> vertHalfedge(NumVert(), -1);
   Vec<uint8_t> counters(NumVert(), 0);
   for_each_n(autoPolicy(halfedge_.size(), 1e5), countAt(0), halfedge_.size(),
              [&vertHalfedge, &counters, this](const int idx) {

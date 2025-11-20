@@ -81,17 +81,32 @@ inline int MaxShadowOverFaces(int vert, VecView<const int> vertHalfedge,
                               VecView<const Halfedge> halfedge,
                               VecView<const vec3> faceNormal,
                               ShadowFunc shadowFunc) {
-  const int firstEdge = vertHalfedge[vert];
-  if (firstEdge < 0) return 0;  // vertex not referenced
+  // Bounds checking
+  if (vert < 0 || vert >= static_cast<int>(vertHalfedge.size())) return 0;
 
-  int maxShadow = std::numeric_limits<int>::min();
-  int current = firstEdge;
-  do {
+  const int firstEdge = vertHalfedge[vert];
+  if (firstEdge < 0 || firstEdge >= static_cast<int>(halfedge.size()))
+    return 0;  // vertex not referenced or invalid
+
+  const int firstFace = firstEdge / 3;
+  if (firstFace >= static_cast<int>(faceNormal.size())) return 0;
+
+  int maxShadow = shadowFunc(faceNormal[firstFace]);
+  int current = NextHalfedge(halfedge[firstEdge].pairedHalfedge);
+
+  // Limit iterations to prevent infinite loops
+  int iterCount = 0;
+  const int maxIter = static_cast<int>(halfedge.size());
+
+  while (current != firstEdge && iterCount < maxIter) {
+    if (current < 0 || current >= static_cast<int>(halfedge.size())) break;
     const int face = current / 3;
+    if (face >= static_cast<int>(faceNormal.size())) break;
     const int shadow = shadowFunc(faceNormal[face]);
     maxShadow = std::max(maxShadow, shadow);
     current = NextHalfedge(halfedge[current].pairedHalfedge);
-  } while (current != firstEdge);
+    iterCount++;
+  }
 
   return maxShadow;
 }
@@ -102,16 +117,31 @@ inline double MaxFaceNormalComponent(int vert, int component,
                                      VecView<const int> vertHalfedge,
                                      VecView<const Halfedge> halfedge,
                                      VecView<const vec3> faceNormal) {
-  const int firstEdge = vertHalfedge[vert];
-  if (firstEdge < 0) return 0.0;  // vertex not referenced
+  // Bounds checking
+  if (vert < 0 || vert >= static_cast<int>(vertHalfedge.size())) return 0.0;
 
-  double maxVal = -std::numeric_limits<double>::infinity();
-  int current = firstEdge;
-  do {
+  const int firstEdge = vertHalfedge[vert];
+  if (firstEdge < 0 || firstEdge >= static_cast<int>(halfedge.size()))
+    return 0.0;  // vertex not referenced or invalid
+
+  const int firstFace = firstEdge / 3;
+  if (firstFace >= static_cast<int>(faceNormal.size())) return 0.0;
+
+  double maxVal = faceNormal[firstFace][component];
+  int current = NextHalfedge(halfedge[firstEdge].pairedHalfedge);
+
+  // Limit iterations to prevent infinite loops
+  int iterCount = 0;
+  const int maxIter = static_cast<int>(halfedge.size());
+
+  while (current != firstEdge && iterCount < maxIter) {
+    if (current < 0 || current >= static_cast<int>(halfedge.size())) break;
     const int face = current / 3;
+    if (face >= static_cast<int>(faceNormal.size())) break;
     maxVal = std::max(maxVal, faceNormal[face][component]);
     current = NextHalfedge(halfedge[current].pairedHalfedge);
-  } while (current != firstEdge);
+    iterCount++;
+  }
 
   return maxVal;
 }
@@ -470,9 +500,22 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   const Manifold::Impl& a = forward ? inP : inQ;
   const Manifold::Impl& b = forward ? inQ : inP;
 
-  // Create vertex-to-halfedge mappings
+  // Create vertex-to-halfedge mappings (sanitize uninitialized values)
   Vec<int> vertHalfedgeP = inP.VertHalfedge();
   Vec<int> vertHalfedgeQ = inQ.VertHalfedge();
+  // Sanitize any invalid entries
+  for (size_t i = 0; i < vertHalfedgeP.size(); ++i) {
+    if (vertHalfedgeP[i] < 0 ||
+        vertHalfedgeP[i] >= static_cast<int>(inP.halfedge_.size())) {
+      vertHalfedgeP[i] = -1;
+    }
+  }
+  for (size_t i = 0; i < vertHalfedgeQ.size(); ++i) {
+    if (vertHalfedgeQ[i] < 0 ||
+        vertHalfedgeQ[i] >= static_cast<int>(inQ.halfedge_.size())) {
+      vertHalfedgeQ[i] = -1;
+    }
+  }
 
   Kernel02 k02{a.vertPos_,    a.halfedge_,     b.halfedge_,     b.vertPos_,
                expandP,       inP.faceNormal_, inQ.faceNormal_, vertHalfedgeP,
@@ -557,9 +600,22 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   verts.reserve(components.size());
   for (int c : components) verts.push_back(c);
 
-  // Create vertex-to-halfedge mappings
+  // Create vertex-to-halfedge mappings (sanitize uninitialized values)
   Vec<int> vertHalfedgeP = inP.VertHalfedge();
   Vec<int> vertHalfedgeQ = inQ.VertHalfedge();
+  // Sanitize any invalid entries
+  for (size_t i = 0; i < vertHalfedgeP.size(); ++i) {
+    if (vertHalfedgeP[i] < 0 ||
+        vertHalfedgeP[i] >= static_cast<int>(inP.halfedge_.size())) {
+      vertHalfedgeP[i] = -1;
+    }
+  }
+  for (size_t i = 0; i < vertHalfedgeQ.size(); ++i) {
+    if (vertHalfedgeQ[i] < 0 ||
+        vertHalfedgeQ[i] >= static_cast<int>(inQ.halfedge_.size())) {
+      vertHalfedgeQ[i] = -1;
+    }
+  }
 
   Vec<int> w03(a.NumVert(), 0);
   Kernel02 k02{a.vertPos_,    a.halfedge_,     b.halfedge_,     b.vertPos_,

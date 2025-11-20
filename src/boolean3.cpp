@@ -491,8 +491,9 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   const Manifold::Impl& b = forward ? inQ : inP;
 
   // Note: a and b may be swapped from inP/inQ depending on forward flag.
-  // The faceNormals passed to Kernel02 should correspond to the halfedges being used:
-  // when a == inP, use inP.faceNormal_; when a == inQ, use inQ.faceNormal_.
+  // The faceNormals passed to Kernel02 should correspond to the halfedges being
+  // used: when a == inP, use inP.faceNormal_; when a == inQ, use
+  // inQ.faceNormal_.
   Kernel02 k02{a.vertPos_, a.halfedge_,   b.halfedge_,   b.vertPos_,
                expandP,    a.faceNormal_, b.faceNormal_, forward};
   Kernel11 k11{inP.vertPos_, inQ.vertPos_,    inP.halfedge_,  inQ.halfedge_,

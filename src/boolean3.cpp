@@ -74,26 +74,61 @@ inline bool Shadows(double p, double q, double dir) {
   return p == q ? dir < 0 : p < q;
 }
 
-// Helper function to get the maximum value of a face normal component
-// across all faces connected to a vertex
+// Helper function to iterate over all face normals connected to a vertex
+// and compute the maximum shadow value
+template <typename ShadowFunc>
+inline int MaxShadowOverFaces(int vert, VecView<const int> vertHalfedge,
+                              VecView<const Halfedge> halfedge,
+                              VecView<const vec3> faceNormal,
+                              ShadowFunc shadowFunc) {
+  // Bounds checking
+  if (vert < 0 || vert >= static_cast<int>(vertHalfedge.size())) return 0;
+
+  const int firstEdge = vertHalfedge[vert];
+  if (firstEdge < 0 || firstEdge >= static_cast<int>(halfedge.size()))
+    return 0;  // vertex not referenced or invalid
+
+  const int firstFace = firstEdge / 3;
+  if (firstFace >= static_cast<int>(faceNormal.size())) return 0;
+
+  // Compute shadow for first face
+  int maxShadow = shadowFunc(faceNormal[firstFace]);
+  int current = NextHalfedge(halfedge[firstEdge].pairedHalfedge);
+
+  // Limit iterations to prevent infinite loops
+  int iterCount = 0;
+  const int maxIter = static_cast<int>(halfedge.size());
+
+  while (current != firstEdge && iterCount < maxIter) {
+    if (current < 0 || current >= static_cast<int>(halfedge.size())) break;
+    const int face = current / 3;
+    if (face >= static_cast<int>(faceNormal.size())) break;
+
+    // Compute shadow for this face and take maximum
+    int shadow = shadowFunc(faceNormal[face]);
+    maxShadow = std::max(maxShadow, shadow);
+
+    current = NextHalfedge(halfedge[current].pairedHalfedge);
+    iterCount++;
+  }
+
+  return maxShadow;
+}
+
+// Helper to get maximum component (for Y/Z direction checks)
 inline double MaxFaceNormalComponent(int vert, int component,
                                      VecView<const int> vertHalfedge,
                                      VecView<const Halfedge> halfedge,
                                      VecView<const vec3> faceNormal) {
-  // Bounds checking
   if (vert < 0 || vert >= static_cast<int>(vertHalfedge.size())) return 0.0;
-
   const int firstEdge = vertHalfedge[vert];
   if (firstEdge < 0 || firstEdge >= static_cast<int>(halfedge.size()))
-    return 0.0;  // vertex not referenced or invalid
-
+    return 0.0;
   const int firstFace = firstEdge / 3;
   if (firstFace >= static_cast<int>(faceNormal.size())) return 0.0;
 
   double maxVal = faceNormal[firstFace][component];
   int current = NextHalfedge(halfedge[firstEdge].pairedHalfedge);
-
-  // Limit iterations to prevent infinite loops
   int iterCount = 0;
   const int maxIter = static_cast<int>(halfedge.size());
 
@@ -124,19 +159,34 @@ inline std::pair<int, vec2> Shadow01(
 
   int s01 = 0;
   if (reverse) {
-    // Use maximum normal components for perturbation direction
-    const double dirS =
-        MaxFaceNormalComponent(q1s, 0, vertHalfedgeQ, halfedgeQ, faceNormalQ);
-    const double dirE =
-        MaxFaceNormalComponent(q1e, 0, vertHalfedgeQ, halfedgeQ, faceNormalQ);
-    s01 = static_cast<int>(Shadows(q1sx, p0x, expandP * dirS)) -
-          static_cast<int>(Shadows(q1ex, p0x, expandP * dirE));
+    // For reverse case, we need to try face normals from q1s and q1e
+    // Since they are different vertices, we need to check both sets and take
+    // maximum Try q1s face normals for the start shadow
+    int maxS01_fromStart = MaxShadowOverFaces(
+        q1s, vertHalfedgeQ, halfedgeQ, faceNormalQ, [&](const vec3& normalS) {
+          // Get corresponding normal from q1e - use max component approach
+          const double dirE = MaxFaceNormalComponent(q1e, 0, vertHalfedgeQ,
+                                                     halfedgeQ, faceNormalQ);
+          return static_cast<int>(Shadows(q1sx, p0x, expandP * normalS.x)) -
+                 static_cast<int>(Shadows(q1ex, p0x, expandP * dirE));
+        });
+    // Try q1e face normals for the end shadow
+    int maxS01_fromEnd = MaxShadowOverFaces(
+        q1e, vertHalfedgeQ, halfedgeQ, faceNormalQ, [&](const vec3& normalE) {
+          // Get corresponding normal from q1s - use max component approach
+          const double dirS = MaxFaceNormalComponent(q1s, 0, vertHalfedgeQ,
+                                                     halfedgeQ, faceNormalQ);
+          return static_cast<int>(Shadows(q1sx, p0x, expandP * dirS)) -
+                 static_cast<int>(Shadows(q1ex, p0x, expandP * normalE.x));
+        });
+    s01 = std::max(maxS01_fromStart, maxS01_fromEnd);
   } else {
-    // Use maximum normal component for perturbation direction
-    const double dir =
-        MaxFaceNormalComponent(p0, 0, vertHalfedgeP, halfedgeP, faceNormalP);
-    s01 = static_cast<int>(Shadows(p0x, q1ex, expandP * dir)) -
-          static_cast<int>(Shadows(p0x, q1sx, expandP * dir));
+    // Compute shadow difference for each face normal, take maximum
+    s01 = MaxShadowOverFaces(
+        p0, vertHalfedgeP, halfedgeP, faceNormalP, [&](const vec3& normal) {
+          return static_cast<int>(Shadows(p0x, q1ex, expandP * normal.x)) -
+                 static_cast<int>(Shadows(p0x, q1sx, expandP * normal.x));
+        });
   }
   vec2 yz01(NAN);
 

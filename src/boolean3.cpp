@@ -81,34 +81,60 @@ inline double GetMaxFaceNormalComponent(
     int vert, int hintEdge, VecView<const Halfedge> halfedge,
     VecView<const vec3> faceNormal, int component) {
   // Find a halfedge that starts at vert
-  int startEdge = hintEdge;
-  if (halfedge[hintEdge].startVert != vert) {
-    // hintEdge ends at vert, so use its paired halfedge
-    startEdge = halfedge[hintEdge].pairedHalfedge;
+  int startEdge = -1;
+  
+  // Try to use the hint if it's valid
+  if (hintEdge >= 0 && hintEdge < static_cast<int>(halfedge.size())) {
+    if (halfedge[hintEdge].startVert == vert) {
+      startEdge = hintEdge;
+    } else if (halfedge[hintEdge].endVert == vert) {
+      // hintEdge ends at vert, so use its paired halfedge
+      int paired = halfedge[hintEdge].pairedHalfedge;
+      if (paired >= 0 && paired < static_cast<int>(halfedge.size()) && 
+          halfedge[paired].startVert == vert) {
+        startEdge = paired;
+      }
+    }
   }
   
-  if (halfedge[startEdge].startVert != vert) {
-    // Still doesn't start at vert, fallback to searching
-    startEdge = -1;
+  // If hint didn't work, search for a starting halfedge
+  if (startEdge == -1) {
     for (size_t i = 0; i < halfedge.size(); ++i) {
       if (halfedge[i].startVert == vert) {
         startEdge = i;
         break;
       }
     }
-    if (startEdge == -1) return 0.0;  // Vertex not found
   }
   
-  double maxVal = -std::numeric_limits<double>::infinity();
+  if (startEdge == -1) return 0.0;  // Vertex not found
+  
+  double maxVal = 0.0;  // Default to 0 if no faces found
+  double maxAbsVal = 0.0;
   
   int current = startEdge;
+  int iterations = 0;
+  const int maxIterations = halfedge.size() + 1;  // Safety limit
+  
   do {
-    current = NextHalfedge(halfedge[current].pairedHalfedge);
-    const vec3& normal = faceNormal[current / 3];
-    double val = normal[component];
-    if (val > maxVal) {
-      maxVal = val;
+    if (iterations++ > maxIterations) break;  // Prevent infinite loop
+    
+    int faceIdx = current / 3;
+    if (faceIdx >= 0 && faceIdx < static_cast<int>(faceNormal.size())) {
+      const vec3& normal = faceNormal[faceIdx];
+      double val = normal[component];
+      double absVal = std::abs(val);
+      // Use the value with maximum absolute magnitude
+      if (absVal > maxAbsVal) {
+        maxAbsVal = absVal;
+        maxVal = val;
+      }
     }
+    
+    int paired = halfedge[current].pairedHalfedge;
+    if (paired < 0 || paired >= static_cast<int>(halfedge.size())) break;  // Invalid
+    current = NextHalfedge(paired);
+    if (current < 0 || current >= static_cast<int>(halfedge.size())) break;  // Invalid
   } while (current != startEdge);
   
   return maxVal;
@@ -456,6 +482,8 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   const Manifold::Impl& a = forward ? inP : inQ;
   const Manifold::Impl& b = forward ? inQ : inP;
 
+  // Note: a and b may be swapped from inP/inQ depending on forward flag
+  // but faceNormals are always from inP and inQ
   Kernel02 k02{a.vertPos_, a.halfedge_,     b.halfedge_,    b.vertPos_,
                expandP,    inP.faceNormal_, inQ.faceNormal_, forward};
   Kernel11 k11{inP.vertPos_,  inQ.vertPos_, inP.halfedge_,

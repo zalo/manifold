@@ -80,18 +80,34 @@ inline double MaxFaceNormalComponent(int vert, int component,
                                      VecView<const int> vertHalfedge,
                                      VecView<const Halfedge> halfedge,
                                      VecView<const vec3> faceNormal) {
+  if (vert < 0 || static_cast<size_t>(vert) >= vertHalfedge.size()) return 0.0;
+  
   const int firstEdge = vertHalfedge[vert];
   if (firstEdge < 0 || static_cast<size_t>(firstEdge) >= halfedge.size()) return 0.0;  // vertex not referenced or invalid index
 
   double maxVal = -std::numeric_limits<double>::infinity();
   int current = firstEdge;
+  int iterations = 0;
+  const int maxIterations = halfedge.size();  // prevent infinite loops
   do {
+    if (current < 0 || static_cast<size_t>(current) >= halfedge.size()) {
+      break;  // invalid halfedge index
+    }
     const int face = current / 3;
-    maxVal = std::max(maxVal, faceNormal[face][component]);
-    current = NextHalfedge(halfedge[current].pairedHalfedge);
+    if (face >= 0 && static_cast<size_t>(face) < faceNormal.size()) {
+      maxVal = std::max(maxVal, faceNormal[face][component]);
+    }
+    const int paired = halfedge[current].pairedHalfedge;
+    if (paired < 0 || static_cast<size_t>(paired) >= halfedge.size()) {
+      break;  // invalid paired halfedge
+    }
+    current = NextHalfedge(paired);
+    if (++iterations > maxIterations) {
+      break;  // prevent infinite loop
+    }
   } while (current != firstEdge);
 
-  return maxVal;
+  return maxVal == -std::numeric_limits<double>::infinity() ? 0.0 : maxVal;
 }
 
 inline std::pair<int, vec2> Shadow01(
@@ -445,8 +461,10 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   Vec<int> vertHalfedgeQ = inQ.VertHalfedge();
 
   Kernel02 k02{a.vertPos_,    a.halfedge_,     b.halfedge_,     b.vertPos_,
-               expandP,       inP.faceNormal_, inQ.faceNormal_, vertHalfedgeP,
-               vertHalfedgeQ, forward};
+               expandP,       a.faceNormal_,   b.faceNormal_,   
+               forward ? vertHalfedgeP : vertHalfedgeQ,
+               forward ? vertHalfedgeQ : vertHalfedgeP, 
+               forward};
   Kernel11 k11{inP.vertPos_,    inQ.vertPos_,  inP.halfedge_,
                inQ.halfedge_,   expandP,       inP.faceNormal_,
                inQ.faceNormal_, vertHalfedgeP, vertHalfedgeQ};
@@ -533,8 +551,10 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
 
   Vec<int> w03(a.NumVert(), 0);
   Kernel02 k02{a.vertPos_,    a.halfedge_,     b.halfedge_,     b.vertPos_,
-               expandP,       inP.faceNormal_, inQ.faceNormal_, vertHalfedgeP,
-               vertHalfedgeQ, forward};
+               expandP,       a.faceNormal_,   b.faceNormal_,   
+               forward ? vertHalfedgeP : vertHalfedgeQ,
+               forward ? vertHalfedgeQ : vertHalfedgeP,
+               forward};
   auto recorderf = [&](int i, int b) {
     const auto [s02, z02] = k02(verts[i], b);
     if (std::isfinite(z02)) w03[verts[i]] += s02 * (!forward ? -1 : 1);

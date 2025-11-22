@@ -381,6 +381,8 @@ void Manifold::Impl::GetFaceBoxMorton(Vec<Box>& faceBox,
                  faceBox[face].Union(pos);
                }
                center /= 3;
+               faceBox[face].Union(faceBox[face].min - vec3(epsilon_));
+               faceBox[face].Union(faceBox[face].max + vec3(epsilon_));
 
                faceMorton[face] = MortonCode(center, bBox_);
              });

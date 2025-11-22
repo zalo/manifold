@@ -389,17 +389,27 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   const Manifold::Impl& a = forward ? inP : inQ;
   const Manifold::Impl& b = forward ? inQ : inP;
 
-  Kernel02 k02{a.vertPos_, b.halfedge_,     b.vertPos_,
+  Vec<vec3> pPerturbed(inP.vertPos_);
+  Vec<vec3> qPerturbed(inQ.vertPos_);
+  for (size_t i = 0; i < inP.vertPos_.size(); i++)
+    pPerturbed[i] += inP.vertNormal_[i] * expandP * inP.epsilon_;
+  // for (size_t i = 0; i < inQ.vertPos_.size(); i++)
+  //   qPerturbed[i] += inQ.vertNormal_[i] * expandP * inQ.epsilon_;
+
+  const Vec<vec3> &aPerturbed = forward ? pPerturbed : qPerturbed;
+  const Vec<vec3> &bPerturbed = forward ? qPerturbed : pPerturbed;
+
+  Kernel02 k02{aPerturbed, b.halfedge_,     bPerturbed,
                expandP,    inP.vertNormal_, forward};
-  Kernel11 k11{inP.vertPos_,  inQ.vertPos_, inP.halfedge_,
+  Kernel11 k11{pPerturbed,  qPerturbed, inP.halfedge_,
                inQ.halfedge_, expandP,      inP.vertNormal_};
 
-  Kernel12 k12{a.halfedge_, b.halfedge_, a.vertPos_, forward, k02, k11};
+  Kernel12 k12{a.halfedge_, b.halfedge_, aPerturbed, forward, k02, k11};
   Kernel12Recorder recorder{k12, forward, {}};
-  auto f = [&a](int i) {
+  auto f = [&a, &aPerturbed](int i) {
     return a.halfedge_[i].IsForward()
-               ? Box(a.vertPos_[a.halfedge_[i].startVert],
-                     a.vertPos_[a.halfedge_[i].endVert])
+               ? Box(aPerturbed[a.halfedge_[i].startVert],
+                     aPerturbed[a.halfedge_[i].endVert])
                : Box();
   };
   b.collider_.Collisions<false, decltype(f), Kernel12Recorder>(
@@ -431,6 +441,16 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   ZoneScoped;
   const Manifold::Impl& a = forward ? inP : inQ;
   const Manifold::Impl& b = forward ? inQ : inP;
+
+  Vec<vec3> pPerturbed(inP.vertPos_);
+  Vec<vec3> qPerturbed(inQ.vertPos_);
+  for (size_t i = 0; i < inP.vertPos_.size(); i++)
+    pPerturbed[i] += inP.vertNormal_[i] * expandP * inP.epsilon_;
+  // for (size_t i = 0; i < inQ.vertPos_.size(); i++)
+  //   qPerturbed[i] += inQ.vertNormal_[i] * expandP * inQ.epsilon_;
+  const Vec<vec3> &aPerturbed = forward ? pPerturbed : qPerturbed;
+  const Vec<vec3> &bPerturbed = forward ? qPerturbed : pPerturbed;
+
   Vec<int> brokenHalfedges;
   int index = forward ? 0 : 1;
 
@@ -471,14 +491,14 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   for (int c : components) verts.push_back(c);
 
   Vec<int> w03(a.NumVert(), 0);
-  Kernel02 k02{a.vertPos_, b.halfedge_,     b.vertPos_,
+  Kernel02 k02{aPerturbed, b.halfedge_,     bPerturbed,
                expandP,    inP.vertNormal_, forward};
   auto recorderf = [&](int i, int b) {
     const auto [s02, z02] = k02(verts[i], b);
     if (std::isfinite(z02)) w03[verts[i]] += s02 * (!forward ? -1 : 1);
   };
   auto recorder = MakeSimpleRecorder(recorderf);
-  auto f = [&](int i) { return a.vertPos_[verts[i]]; };
+  auto f = [&](int i) { return aPerturbed[verts[i]]; };
   b.collider_.Collisions<false, decltype(f), decltype(recorder)>(
       f, verts.size(), recorder);
   // flood fill

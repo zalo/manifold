@@ -309,7 +309,8 @@ void AppendPartialEdges(Manifold::Impl& outR, Vec<char>& wholeHalfedgeP,
                         concurrent_map<int, std::vector<EdgePos>>& edgesP,
                         Vec<TriRef>& halfedgeRef, const Manifold::Impl& inP,
                         const Vec<int>& i03, const Vec<int>& vP2R,
-                        const Vec<int>::IterC faceP2R, bool forward) {
+                        const Vec<int>::IterC faceP2R, bool forward,
+                        const Vec<vec3>& vertPosPerturbed) {
   ZoneScoped;
   // Each edge in the map is partially retained; for each of these, look up
   // their original verts and include them based on their winding number (i03),
@@ -317,7 +318,7 @@ void AppendPartialEdges(Manifold::Impl& outR, Vec<char>& wholeHalfedgeP,
   // projected along the edge vector to pair them up, then distribute these
   // edges to their faces.
   Vec<Halfedge>& halfedgeR = outR.halfedge_;
-  const Vec<vec3>& vertPosP = inP.vertPos_;
+  const Vec<vec3>& vertPosP = vertPosPerturbed;
   const Vec<Halfedge>& halfedgeP = inP.halfedge_;
 
   for (auto& value : edgesP) {
@@ -560,7 +561,8 @@ struct Barycentric {
 };
 
 void CreateProperties(Manifold::Impl& outR, const Manifold::Impl& inP,
-                      const Manifold::Impl& inQ) {
+                      const Manifold::Impl& inQ, const Vec<vec3>& pPerturbed,
+                      const Vec<vec3>& qPerturbed) {
   ZoneScoped;
   const int numPropP = inP.NumProp();
   const int numPropQ = inQ.NumProp();
@@ -571,8 +573,8 @@ void CreateProperties(Manifold::Impl& outR, const Manifold::Impl& inP,
   const int numTri = outR.NumTri();
   Vec<vec3> bary(outR.halfedge_.size());
   for_each_n(autoPolicy(numTri, 1e4), countAt(0), numTri,
-             Barycentric({bary, outR.meshRelation_.triRef, inP.vertPos_,
-                          inQ.vertPos_, outR.vertPos_, inP.halfedge_,
+             Barycentric({bary, outR.meshRelation_.triRef, pPerturbed,
+                          qPerturbed, outR.vertPos_, inP.halfedge_,
                           inQ.halfedge_, outR.halfedge_, outR.epsilon_}));
 
   using Entry = std::pair<ivec3, int>;
@@ -757,6 +759,14 @@ Manifold::Impl Boolean3::Result(OpType op) const {
   transform(w30_.begin(), w30_.end(), i30.begin(),
             [c2, c3](int v) { return c2 + c3 * v; });
 
+  // Create perturbed vertex positions for geometric consistency
+  Vec<vec3> pPerturbed(inP_.vertPos_);
+  Vec<vec3> qPerturbed(inQ_.vertPos_);
+  for (size_t i = 0; i < inP_.vertPos_.size(); i++)
+    pPerturbed[i] += inP_.vertNormal_[i] * expandP_ * inP_.epsilon_;
+  // for (size_t i = 0; i < inQ_.vertPos_.size(); i++)
+  //   qPerturbed[i] += inQ_.vertNormal_[i] * expandP_ * inQ_.epsilon_;
+
   Vec<int> vP2R(inP_.NumVert());
   exclusive_scan(i03.begin(), i03.end(), vP2R.begin(), 0, AbsSum());
   int numVertR = AbsSum()(vP2R.back(), i03.back());
@@ -845,9 +855,10 @@ Manifold::Impl Boolean3::Result(OpType op) const {
   Vec<TriRef> halfedgeRef(2 * outR.NumEdge());
 
   AppendPartialEdges(outR, wholeHalfedgeP, facePtrR, edgesP, halfedgeRef, inP_,
-                     i03, vP2R, facePQ2R.begin(), true);
+                     i03, vP2R, facePQ2R.begin(), true, pPerturbed);
   AppendPartialEdges(outR, wholeHalfedgeQ, facePtrR, edgesQ, halfedgeRef, inQ_,
-                     i30, vQ2R, facePQ2R.begin() + inP_.NumTri(), false);
+                     i30, vQ2R, facePQ2R.begin() + inP_.NumTri(), false,
+                     qPerturbed);
 
   edgesP.clear();
   edgesQ.clear();
@@ -894,7 +905,7 @@ Manifold::Impl Boolean3::Result(OpType op) const {
     DEBUG_ASSERT(outR.IsManifold(), logicErr,
                  "triangulated mesh is not manifold!");
 
-  CreateProperties(outR, inP_, inQ_);
+  CreateProperties(outR, inP_, inQ_, pPerturbed, qPerturbed);
 
   UpdateReference(outR, inP_, inQ_, invertQ);
 

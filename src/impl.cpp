@@ -755,6 +755,157 @@ void Manifold::Impl::CalculateNormals() {
 }
 
 /**
+ * The algorithm described by Smith's dissertation does not handle the edge
+ * case where faces of p are lying perfectly on top of faces of q ("coincident
+ * faces"). This method determines whether each of this mesh's vertices are
+ * inside or outside of mesh q, by pushing them in one of 8 directions defined
+ * by the 8 octants of 3D space. This is "symbolic perturbation" - pretending
+ * as though the vertices of coincident faces are not actually coincident, in
+ * order to break the tie. For example, an x component of true means to push
+ * that vertex's x in the positive direction, in the hopes of engulfing a
+ * coincident face. Without this, the algorithm doesn't know what to do when
+ * p_vertex.x == q_vertex.x. The method makes use of surface normals to decide
+ * how to break ties.
+ */
+Vec<ivec3> Manifold::Impl::GetPerturbationMap(const Impl& other,
+                                              OpType op) const {
+  ZoneScoped;
+  const Impl& p = *this;
+  const Impl& q = other;
+
+  // Maps each vertex to a list of surface normals belonging
+  // to coincident faces at that vertex
+  std::vector<std::vector<vec3>> map(p.NumVert());
+
+  // Helper function to add a normal to the list if not already present
+  auto addNormal = [](std::vector<vec3>& normals, const vec3& normal) {
+    for (const vec3& other : normals) {
+      if (fabs(other.x - normal.x) < kPrecision &&
+          fabs(other.y - normal.y) < kPrecision &&
+          fabs(other.z - normal.z) < kPrecision) {
+        return;
+      }
+    }
+    normals.push_back(normal);
+  };
+
+  // Loop through every possible combination of triangles.
+  // TODO: Optimize using BVH collider
+  for (size_t triIdxP = 0; triIdxP < p.NumTri(); ++triIdxP) {
+    const vec3 pNor = p.faceNormal_[triIdxP];
+    const int pIdx1 = p.halfedge_[triIdxP * 3].startVert;
+    const int pIdx2 = p.halfedge_[triIdxP * 3].endVert;
+    const int pIdx3 = p.halfedge_[triIdxP * 3 + 1].endVert;
+    if (pIdx1 < 0 || pIdx2 < 0 || pIdx3 < 0) continue;
+
+    const vec3 pVert1 = p.vertPos_[pIdx1];
+    const vec3 pVert2 = p.vertPos_[pIdx2];
+    const vec3 pVert3 = p.vertPos_[pIdx3];
+
+    for (size_t triIdxQ = 0; triIdxQ < q.NumTri(); ++triIdxQ) {
+      const vec3 qNor = q.faceNormal_[triIdxQ];
+
+      // If adding, search for triangles with opposite surface normals
+      // Otherwise, search for triangles with identical surface normals
+      const double dotVal = la::dot(pNor, qNor);
+      if (op == OpType::Add && dotVal > -1.0 + kPrecision) continue;
+      if (op != OpType::Add && dotVal < 1.0 - kPrecision) continue;
+
+      const int qIdx1 = q.halfedge_[triIdxQ * 3].startVert;
+      const int qIdx2 = q.halfedge_[triIdxQ * 3].endVert;
+      const int qIdx3 = q.halfedge_[triIdxQ * 3 + 1].endVert;
+      if (qIdx1 < 0 || qIdx2 < 0 || qIdx3 < 0) continue;
+
+      const vec3 qVerts[3] = {q.vertPos_[qIdx1], q.vertPos_[qIdx2],
+                              q.vertPos_[qIdx3]};
+
+      // Coplanar check
+      if (fabs(la::dot(pNor, pVert1 - qVerts[0])) > kPrecision) continue;
+
+      for (const vec3& qVert : qVerts) {
+        // Case 1: qVert intersects VERTEX of p. Perturb 1 vertex
+        if (qVert == pVert1) {
+          addNormal(map[pIdx1], qNor);
+          continue;
+        }
+        if (qVert == pVert2) {
+          addNormal(map[pIdx2], qNor);
+          continue;
+        }
+        if (qVert == pVert3) {
+          addNormal(map[pIdx3], qNor);
+          continue;
+        }
+
+        // Compute unnormalized barycentric coords of qVert within triIdxP
+        const double pEdge12 =
+            la::dot(pNor, la::cross(pVert1 - qVert, pVert2 - qVert));
+        const double pEdge23 =
+            la::dot(pNor, la::cross(pVert2 - qVert, pVert3 - qVert));
+        const double pEdge31 =
+            la::dot(pNor, la::cross(pVert3 - qVert, pVert1 - qVert));
+
+        // Case 2: qVert intersects EDGE of p. Perturb 2 vertices
+        if (fabs(pEdge12) < kPrecision) {
+          addNormal(map[pIdx1], qNor);
+          addNormal(map[pIdx2], qNor);
+          continue;
+        }
+        if (fabs(pEdge23) < kPrecision) {
+          addNormal(map[pIdx2], qNor);
+          addNormal(map[pIdx3], qNor);
+          continue;
+        }
+        if (fabs(pEdge31) < kPrecision) {
+          addNormal(map[pIdx3], qNor);
+          addNormal(map[pIdx1], qNor);
+          continue;
+        }
+
+        // Case 3: qVert intersects TRIANGLE of p. Perturb 3 vertices
+        if (pEdge12 >= -kPrecision && pEdge23 >= -kPrecision &&
+            pEdge31 >= -kPrecision) {
+          addNormal(map[pIdx1], qNor);
+          addNormal(map[pIdx2], qNor);
+          addNormal(map[pIdx3], qNor);
+        }
+
+        // Case 4: qVert does not intersect in any way
+      }
+    }
+  }
+
+  // Convert the map to a vector of ivec3 (boolean stored as int)
+  // symPert = true means return true in Shadows when p==q
+  // For vertices not involved in coincident faces, fall back to vertex normal
+  // direction (matching original behavior)
+  double expandP = (op == OpType::Add) ? 1.0 : -1.0;
+  Vec<ivec3> result(p.NumVert());
+  for (size_t i = 0; i < p.NumVert(); ++i) {
+    if (map[i].empty()) {
+      // For non-coincident vertices, use the original vertex normal behavior
+      // Original: Shadows returns true when p==q if expandP * normal < 0
+      vec3 vn = p.vertNormal_[i];
+      result[i] = ivec3(expandP * vn.x < 0 ? 1 : 0,
+                        expandP * vn.y < 0 ? 1 : 0,
+                        expandP * vn.z < 0 ? 1 : 0);
+    } else {
+      // For coincident vertices, use the sum of coincident face normals
+      vec3 sum(0.0);
+      for (const vec3& normal : map[i]) {
+        sum += normal;
+      }
+      // Component is true if >= -kPrecision (i.e., non-negative direction)
+      result[i] = ivec3(sum.x >= -kPrecision ? 1 : 0,
+                        sum.y >= -kPrecision ? 1 : 0,
+                        sum.z >= -kPrecision ? 1 : 0);
+    }
+  }
+
+  return result;
+}
+
+/**
  * Remaps all the contained meshIDs to new unique values to represent new
  * instances of these meshes.
  */

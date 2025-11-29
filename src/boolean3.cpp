@@ -70,48 +70,50 @@ vec4 Intersect(const vec3& pL, const vec3& pR, const vec3& qL, const vec3& qR) {
   return xyzz;
 }
 
-inline bool Shadows(double p, double q, double dir) {
-  return p == q ? dir < 0 : p < q;
+inline bool Shadows(double p, double q, bool symPert) {
+  return p == q ? symPert : p < q;
 }
 
 inline std::pair<int, vec2> Shadow01(
     const int p0, const int q1, VecView<const vec3> vertPosP,
     VecView<const vec3> vertPosQ, VecView<const Halfedge> halfedgeQ,
-    const double expandP, VecView<const vec3> normal, const bool reverse) {
+    VecView<const ivec3> symPertMap, const bool reverse) {
   const int q1s = halfedgeQ[q1].startVert;
   const int q1e = halfedgeQ[q1].endVert;
-  const double p0x = vertPosP[p0].x;
-  const double q1sx = vertPosQ[q1s].x;
-  const double q1ex = vertPosQ[q1e].x;
-  int s01 = reverse ? Shadows(q1sx, p0x, expandP * normal[q1s].x) -
-                          Shadows(q1ex, p0x, expandP * normal[q1e].x)
-                    : Shadows(p0x, q1ex, expandP * normal[p0].x) -
-                          Shadows(p0x, q1sx, expandP * normal[p0].x);
+  const vec3 p0Pos = vertPosP[p0];
+  const vec3 q1sPos = vertPosQ[q1s];
+  const vec3 q1ePos = vertPosQ[q1e];
+
+  // 1D vertex-edge intersection test
+  int s01 = reverse ? Shadows(q1sPos.x, p0Pos.x, symPertMap[q1s].x) -
+                          Shadows(q1ePos.x, p0Pos.x, symPertMap[q1e].x)
+                    : Shadows(p0Pos.x, q1ePos.x, symPertMap[p0].x) -
+                          Shadows(p0Pos.x, q1sPos.x, symPertMap[p0].x);
   vec2 yz01(NAN);
 
   if (s01 != 0) {
-    yz01 = Interpolate(vertPosQ[q1s], vertPosQ[q1e], vertPosP[p0].x);
+    yz01 = Interpolate(q1sPos, q1ePos, p0Pos.x);
     if (reverse) {
-      vec3 diff = vertPosQ[q1s] - vertPosP[p0];
+      vec3 diff = q1sPos - p0Pos;
       const double start2 = la::dot(diff, diff);
-      diff = vertPosQ[q1e] - vertPosP[p0];
+      diff = q1ePos - p0Pos;
       const double end2 = la::dot(diff, diff);
-      const double dir = start2 < end2 ? normal[q1s].y : normal[q1e].y;
-      if (!Shadows(yz01[0], vertPosP[p0].y, expandP * dir)) s01 = 0;
+      const bool yz01SymPert = start2 < end2 ? symPertMap[q1s].y : symPertMap[q1e].y;
+      if (!Shadows(yz01[0], p0Pos.y, yz01SymPert)) s01 = 0;
     } else {
-      if (!Shadows(vertPosP[p0].y, yz01[0], expandP * normal[p0].y)) s01 = 0;
+      if (!Shadows(p0Pos.y, yz01[0], symPertMap[p0].y)) s01 = 0;
     }
   }
   return std::make_pair(s01, yz01);
 }
 
+// 2D edge-edge intersection test
 struct Kernel11 {
   VecView<const vec3> vertPosP;
   VecView<const vec3> vertPosQ;
   VecView<const Halfedge> halfedgeP;
   VecView<const Halfedge> halfedgeQ;
-  const double expandP;
-  VecView<const vec3> normalP;
+  VecView<const ivec3> symPertMap;
 
   std::pair<int, vec4> operator()(int p1, int q1) {
     vec4 xyzz11 = vec4(NAN);
@@ -128,7 +130,7 @@ struct Kernel11 {
     const int p0[2] = {halfedgeP[p1].startVert, halfedgeP[p1].endVert};
     for (int i : {0, 1}) {
       const auto [s01, yz01] = Shadow01(p0[i], q1, vertPosP, vertPosQ,
-                                        halfedgeQ, expandP, normalP, false);
+                                        halfedgeQ, symPertMap, false);
       // If the value is NaN, then these do not overlap.
       if (std::isfinite(yz01[0])) {
         s11 += s01 * (i == 0 ? -1 : 1);
@@ -144,7 +146,7 @@ struct Kernel11 {
     const int q0[2] = {halfedgeQ[q1].startVert, halfedgeQ[q1].endVert};
     for (int i : {0, 1}) {
       const auto [s10, yz10] = Shadow01(q0[i], p1, vertPosQ, vertPosP,
-                                        halfedgeP, expandP, normalP, true);
+                                        halfedgeP, symPertMap, true);
       // If the value is NaN, then these do not overlap.
       if (std::isfinite(yz10[0])) {
         s11 += s10 * (i == 0 ? -1 : 1);
@@ -169,21 +171,21 @@ struct Kernel11 {
       const double start2 = la::dot(diff, diff);
       diff = vertPosP[p1e] - vec3(xyzz11);
       const double end2 = la::dot(diff, diff);
-      const double dir = start2 < end2 ? normalP[p1s].z : normalP[p1e].z;
+      const bool xyzz11SymPert = start2 < end2 ? symPertMap[p1s].z : symPertMap[p1e].z;
 
-      if (!Shadows(xyzz11.z, xyzz11.w, expandP * dir)) s11 = 0;
+      if (!Shadows(xyzz11.z, xyzz11.w, xyzz11SymPert)) s11 = 0;
     }
 
     return std::make_pair(s11, xyzz11);
   }
 };
 
+// 2D vertex-triangle intersection test
 struct Kernel02 {
   VecView<const vec3> vertPosP;
   VecView<const Halfedge> halfedgeQ;
   VecView<const vec3> vertPosQ;
-  const double expandP;
-  VecView<const vec3> vertNormalP;
+  VecView<const ivec3> symPertMap;
   const bool forward;
 
   std::pair<int, double> operator()(int p0, int q2) {
@@ -196,7 +198,7 @@ struct Kernel02 {
     // Either the left or right must shadow, but not both. This ensures the
     // intersection is between the left and right.
     bool shadows = false;
-    int closestVert = -1;
+    int closestVertQ = -1;
     double minMetric = std::numeric_limits<double>::infinity();
     s02 = 0;
 
@@ -212,12 +214,12 @@ struct Kernel02 {
         const double metric = la::dot(diff, diff);
         if (metric < minMetric) {
           minMetric = metric;
-          closestVert = qVert;
+          closestVertQ = qVert;
         }
       }
 
       const auto syz01 = Shadow01(p0, q1F, vertPosP, vertPosQ, halfedgeQ,
-                                  expandP, vertNormalP, !forward);
+                                  symPertMap, !forward);
       const int s01 = syz01.first;
       const vec2 yz01 = syz01.second;
       // If the value is NaN, then these do not overlap.
@@ -234,13 +236,12 @@ struct Kernel02 {
       z02 = NAN;
     } else {
       DEBUG_ASSERT(k == 2, logicErr, "Boolean manifold error: s02");
-      vec3 vertPos = vertPosP[p0];
-      z02 = Interpolate(yzzRL[0], yzzRL[1], vertPos.y)[1];
+      z02 = Interpolate(yzzRL[0], yzzRL[1], posP.y)[1];
       if (forward) {
-        if (!Shadows(vertPos.z, z02, expandP * vertNormalP[p0].z)) s02 = 0;
+        if (!Shadows(posP.z, z02, symPertMap[p0].z)) s02 = 0;
       } else {
-        // DEBUG_ASSERT(closestVert != -1, topologyErr, "No closest vert");
-        if (!Shadows(z02, vertPos.z, expandP * vertNormalP[closestVert].z))
+        // DEBUG_ASSERT(closestVertQ != -1, topologyErr, "No closest vert");
+        if (!Shadows(z02, posP.z, symPertMap[closestVertQ].z))
           s02 = 0;
       }
     }
@@ -248,6 +249,7 @@ struct Kernel02 {
   }
 };
 
+// 3D edge-triangle intersection test
 struct Kernel12 {
   VecView<const Halfedge> halfedgesP;
   VecView<const Halfedge> halfedgesQ;
@@ -383,16 +385,16 @@ struct Kernel12Recorder {
 std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
                                             const Manifold::Impl& inQ,
                                             Vec<std::array<int, 2>>& p1q2,
-                                            double expandP, bool forward) {
+                                            VecView<const ivec3> symPertMap,
+                                            bool forward) {
   ZoneScoped;
   // a: 1 (edge), b: 2 (face)
   const Manifold::Impl& a = forward ? inP : inQ;
   const Manifold::Impl& b = forward ? inQ : inP;
 
-  Kernel02 k02{a.vertPos_, b.halfedge_,     b.vertPos_,
-               expandP,    inP.vertNormal_, forward};
+  Kernel02 k02{a.vertPos_, b.halfedge_, b.vertPos_, symPertMap, forward};
   Kernel11 k11{inP.vertPos_,  inQ.vertPos_, inP.halfedge_,
-               inQ.halfedge_, expandP,      inP.vertNormal_};
+               inQ.halfedge_, symPertMap};
 
   Kernel12 k12{a.halfedge_, b.halfedge_, a.vertPos_, forward, k02, k11};
   Kernel12Recorder recorder{k12, forward, {}};
@@ -425,9 +427,10 @@ std::tuple<Vec<int>, Vec<vec3>> Intersect12(const Manifold::Impl& inP,
   return std::make_tuple(x12, v12);
 };
 
+// 3D vertex-solid intersection test
 Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
-                   const VecView<std::array<int, 2>> p1q2, double expandP,
-                   bool forward) {
+                   const VecView<std::array<int, 2>> p1q2,
+                   VecView<const ivec3> symPertMap, bool forward) {
   ZoneScoped;
   const Manifold::Impl& a = forward ? inP : inQ;
   const Manifold::Impl& b = forward ? inQ : inP;
@@ -471,8 +474,7 @@ Vec<int> Winding03(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   for (int c : components) verts.push_back(c);
 
   Vec<int> w03(a.NumVert(), 0);
-  Kernel02 k02{a.vertPos_, b.halfedge_,     b.vertPos_,
-               expandP,    inP.vertNormal_, forward};
+  Kernel02 k02{a.vertPos_, b.halfedge_, b.vertPos_, symPertMap, forward};
   auto recorderf = [&](int i, int b) {
     const auto [s02, z02] = k02(verts[i], b);
     if (std::isfinite(z02)) w03[verts[i]] += s02 * (!forward ? -1 : 1);
@@ -496,9 +498,6 @@ namespace manifold {
 Boolean3::Boolean3(const Manifold::Impl& inP, const Manifold::Impl& inQ,
                    OpType op)
     : inP_(inP), inQ_(inQ), expandP_(op == OpType::Add ? 1.0 : -1.0) {
-  // Symbolic perturbation:
-  // Union -> expand inP
-  // Difference, Intersection -> contract inP
   constexpr size_t INT_MAX_SZ =
       static_cast<size_t>(std::numeric_limits<int>::max());
 
@@ -514,14 +513,17 @@ Boolean3::Boolean3(const Manifold::Impl& inP, const Manifold::Impl& inQ,
   intersections.Start();
 #endif
 
+  // Compute the symbolic perturbation map for handling coincident faces
+  Vec<ivec3> symPertMap = inP.GetPerturbationMap(inQ, op);
+
   // Level 3
   // Build up the intersection of the edges and triangles, keeping only those
   // that intersect, and record the direction the edge is passing through the
   // triangle.
-  std::tie(x12_, v12_) = Intersect12(inP, inQ, p1q2_, expandP_, true);
+  std::tie(x12_, v12_) = Intersect12(inP, inQ, p1q2_, symPertMap, true);
   PRINT("x12 size = " << x12_.size());
 
-  std::tie(x21_, v21_) = Intersect12(inP, inQ, p2q1_, expandP_, false);
+  std::tie(x21_, v21_) = Intersect12(inP, inQ, p2q1_, symPertMap, false);
   PRINT("x21 size = " << x21_.size());
 
   if (x12_.size() > INT_MAX_SZ || x21_.size() > INT_MAX_SZ) {
@@ -531,8 +533,8 @@ Boolean3::Boolean3(const Manifold::Impl& inP, const Manifold::Impl& inQ,
 
   // Compute winding numbers of all vertices using flood fill
   // Vertices on the same connected component have the same winding number
-  w03_ = Winding03(inP, inQ, p1q2_, expandP_, true);
-  w30_ = Winding03(inP, inQ, p2q1_, expandP_, false);
+  w03_ = Winding03(inP, inQ, p1q2_, symPertMap, true);
+  w30_ = Winding03(inP, inQ, p2q1_, symPertMap, false);
 
 #ifdef MANIFOLD_DEBUG
   intersections.Stop();

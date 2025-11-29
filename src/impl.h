@@ -298,6 +298,7 @@ struct Manifold::Impl {
   void CreateHalfedges(const Vec<ivec3>& triProp,
                        const Vec<ivec3>& triVert = {});
   void CalculateNormals();
+  Vec<ivec3> GetPerturbationMap(const Impl& other, OpType op) const;
   void IncrementMeshIDs();
 
   void Update();

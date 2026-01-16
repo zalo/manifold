@@ -75,22 +75,12 @@ class TestResult:
 
 def compute_genus(m: Manifold) -> int:
     """
-    Compute the genus of a manifold using Euler characteristic.
-    For a closed manifold: V - E + F = 2 - 2g (where g is genus)
-    So: g = 1 - (V - E + F) / 2
-    For a triangular mesh: E = 3F/2 (each edge shared by 2 triangles)
-    So: g = 1 - (V - F/2) / 2 = 1 - V/2 + F/4
+    Get the genus of a manifold using Manifold's built-in method.
+    Returns -1 for multi-component manifolds.
     """
     if m.is_empty():
         return 0
-    v = m.num_vert()
-    f = m.num_tri()
-    # For closed triangular mesh: E = 3F/2
-    e = (3 * f) // 2
-    euler = v - e + f
-    # genus = (2 - euler) / 2 for closed surfaces
-    genus = (2 - euler) // 2
-    return max(0, genus)  # Genus should be non-negative
+    return m.genus()
 
 
 def get_git_info() -> dict:
@@ -574,7 +564,8 @@ def deploy_to_cloudflare(output_dir: str, project_name: str = "manifold-offset-c
         result = subprocess.run(
             ["wrangler", "pages", "deploy", ".",
              f"--project-name={project_name}",
-             "--commit-dirty=true"],
+             "--commit-dirty=true",
+             "--branch=main"],
             cwd=output_dir,
             capture_output=True,
             text=True,

@@ -326,6 +326,22 @@ class Manifold {
     ResultTooLarge,
   };
 
+  /**
+   * @brief Method used for computing offset operations.
+   */
+  enum class OffsetMethod {
+    /// Use MinkowskiSum/Difference with a sphere. Most robust, handles all
+    /// cases correctly but may be slower for simple shapes.
+    Minkowski,
+    /// Original offset method using cylinders on convex edges and spheres on
+    /// convex vertices. Faster for simple shapes but may have artifacts.
+    Simple,
+    /// Elegant offset method using circular arc wedges on edges and hulled
+    /// sphere caps on vertices. Better edge resolution but may have precision
+    /// issues with layered operations.
+    Elegant,
+  };
+
   /** @name Information
    *  Details of the manifold
    */
@@ -395,6 +411,8 @@ class Manifold {
   Manifold TrimByPlane(vec3 normal, double originOffset) const;
   Manifold MinkowskiSum(const Manifold&) const;
   Manifold MinkowskiDifference(const Manifold&) const;
+  Manifold Offset(double delta, int circularSegments = 0,
+                  OffsetMethod method = OffsetMethod::Minkowski) const;
   ///@}
 
   /** @name Properties
@@ -503,6 +521,8 @@ class Manifold {
   CsgLeafNode& GetCsgLeafNode() const;
 
   Manifold Minkowski(const Manifold&, bool inset = false) const;
+  Manifold OffsetSimple(double delta, int circularSegments) const;
+  Manifold OffsetElegant(double delta, int circularSegments) const;
 };
 /** @} */
 

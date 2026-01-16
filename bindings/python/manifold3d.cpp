@@ -203,6 +203,22 @@ const std::string manifold__rotate__v =
 NB_MODULE(manifold3d, m) {
   m.doc() = "Python binding for the Manifold library.";
 
+  // Define OffsetMethod enum before Manifold class so it can be used as default argument
+  nb::enum_<Manifold::OffsetMethod>(
+      m, "OffsetMethod",
+      "Method used for computing offset (dilation/erosion) operations")
+      .value("Minkowski", Manifold::OffsetMethod::Minkowski,
+             "Use MinkowskiSum/Difference with a sphere. Most robust, handles "
+             "all cases correctly but may be slower for simple shapes.")
+      .value("Simple", Manifold::OffsetMethod::Simple,
+             "Original offset method using cylinders on convex edges and "
+             "spheres on convex vertices. Faster for simple shapes but may "
+             "have artifacts.")
+      .value("Elegant", Manifold::OffsetMethod::Elegant,
+             "Elegant offset method using circular arc wedges on edges and "
+             "hulled sphere caps on vertices. Better edge resolution but may "
+             "have precision issues with layered operations.");
+
   m.def("set_min_circular_angle", Quality::SetMinCircularAngle,
         nb::arg("angle"), quality__set_min_circular_angle__angle);
 
@@ -372,6 +388,20 @@ NB_MODULE(manifold3d, m) {
            manifold__minkowski_sum__other)
       .def("minkowski_difference", &Manifold::MinkowskiDifference,
            nb::arg("other"), manifold__minkowski_difference__other)
+      .def("offset", &Manifold::Offset, nb::arg("delta"),
+           nb::arg("circular_segments") = 0,
+           nb::arg("method") = Manifold::OffsetMethod::Minkowski,
+           "Compute a morphological offset (dilation/erosion) of this "
+           "manifold.\n\n"
+           "Positive delta values dilate (expand) the manifold, while negative "
+           "values erode (shrink) it.\n\n"
+           ":param delta: The offset distance. Positive for dilation, negative "
+           "for erosion.\n"
+           ":param circular_segments: Number of segments used to approximate "
+           "circles. If zero, uses a default based on the Quality settings.\n"
+           ":param method: The algorithm to use (Minkowski, Simple, or "
+           "Elegant).\n"
+           ":return: The offset manifold.")
       .def(
           "slice",
           [](const Manifold& self, double height) {

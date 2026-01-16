@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <map>
 #include <numeric>
+#include <unordered_map>
 
 #include "boolean3.h"
 #include "csg_tree.h"
@@ -1121,6 +1122,281 @@ Manifold Manifold::MinkowskiSum(const Manifold& other) const {
  */
 Manifold Manifold::MinkowskiDifference(const Manifold& other) const {
   return this->Minkowski(other, true);
+}
+
+/**
+ * Compute a morphological offset of this manifold.
+ *
+ * Positive delta values dilate (expand) the manifold, while negative values
+ * erode (shrink) it. This is equivalent to MinkowskiSum/Difference with a
+ * sphere, but alternative methods may be faster for certain cases.
+ *
+ * @param delta The offset distance. Positive for dilation, negative for
+ * erosion.
+ * @param circularSegments Number of segments used to approximate circles.
+ * If zero, uses Quality::GetCircularSegments().
+ * @param method The algorithm to use for computing the offset.
+ */
+Manifold Manifold::Offset(double delta, int circularSegments,
+                          OffsetMethod method) const {
+  if (IsEmpty() || delta == 0) return *this;
+
+  const int n = circularSegments > 0
+                    ? circularSegments
+                    : Quality::GetCircularSegments(std::abs(delta));
+
+  switch (method) {
+    case OffsetMethod::Minkowski: {
+      Manifold sphere = Manifold::Sphere(std::abs(delta), n);
+      if (delta > 0) {
+        return this->MinkowskiSum(sphere);
+      } else {
+        return this->MinkowskiDifference(sphere);
+      }
+    }
+    case OffsetMethod::Simple:
+      return OffsetSimple(delta, n);
+    case OffsetMethod::Elegant:
+      return OffsetElegant(delta, n);
+    default:
+      return *this;
+  }
+}
+
+/**
+ * Simple offset implementation using cylinders on convex edges and spheres
+ * on convex vertices. Based on PR #668.
+ */
+Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
+  auto pImpl = GetCsgLeafNode().GetImpl();
+
+  const bool inset = delta < 0;
+  const double radius = std::abs(delta);
+  const int n =
+      circularSegments > 0 ? (circularSegments + 3) / 4
+                           : Quality::GetCircularSegments(radius) / 4;
+  const Manifold sphere = Manifold::Sphere(radius, 4 * n);
+  const Manifold cylinder = Manifold::Cylinder(1, radius, radius, 4 * n);
+  const Polygons triangle = {{{-1, -1}, {1, 0}, {0, 1}}};
+  const Manifold block = Manifold::Extrude(triangle, 1);
+
+  // Find convex edges and vertices
+  std::vector<int> convexEdges;
+  std::vector<bool> vertConvex(NumVert(), false);
+
+  for (size_t idx = 0; idx < pImpl->halfedge_.size(); idx++) {
+    const Halfedge& edge = pImpl->halfedge_[idx];
+    if (!edge.IsForward()) continue;
+
+    const int face0 = idx / 3;
+    const int face1 = edge.pairedHalfedge / 3;
+    const vec3 normal0 = pImpl->faceNormal_[face0];
+    const vec3 normal1 = pImpl->faceNormal_[face1];
+
+    const vec3 edgeVec =
+        pImpl->vertPos_[edge.endVert] - pImpl->vertPos_[edge.startVert];
+    const double convexity =
+        (inset ? -1.0 : 1.0) * la::dot(edgeVec, la::cross(normal0, normal1));
+
+    if (convexity > 0) {
+      convexEdges.push_back(idx);
+      vertConvex[edge.startVert] = true;
+      vertConvex[edge.endVert] = true;
+    }
+  }
+
+  std::vector<int> convexVerts;
+  for (size_t i = 0; i < vertConvex.size(); i++) {
+    if (vertConvex[i]) convexVerts.push_back(i);
+  }
+
+  const size_t edgeOffset = 1 + NumTri();
+  const size_t vertOffset = edgeOffset + convexEdges.size();
+  std::vector<Manifold> batch(vertOffset + convexVerts.size());
+  batch[0] = *this;
+
+  // Extrude triangles
+  for (size_t tri = 0; tri < NumTri(); tri++) {
+    vec3 triPos[3];
+    for (int i = 0; i < 3; i++) {
+      triPos[i] = pImpl->vertPos_[pImpl->halfedge_[3 * tri + i].startVert];
+    }
+    const vec3 normal = radius * pImpl->faceNormal_[tri];
+    batch[1 + tri] = block.Warp([triPos, normal](vec3& pos) {
+      const double dir = pos.z > 0 ? 1.0 : -1.0;
+      if (pos.x < 0) {
+        pos = triPos[0];
+      } else if (pos.x > 0) {
+        pos = triPos[1];
+      } else {
+        pos = triPos[2];
+      }
+      pos += dir * normal;
+    });
+  }
+
+  // Add cylinders on convex edges
+  for (size_t i = 0; i < convexEdges.size(); i++) {
+    const Halfedge& halfedge = pImpl->halfedge_[convexEdges[i]];
+    vec3 edge = pImpl->vertPos_[halfedge.endVert] -
+                pImpl->vertPos_[halfedge.startVert];
+    const double length = la::length(edge);
+    if (length < 1e-10) continue;
+
+    // Compute rotation to align cylinder with edge
+    edge = la::normalize(edge);
+    vec3 up(0, 0, 1);
+    vec3 axis = la::cross(up, edge);
+    double angle = std::acos(std::clamp(la::dot(up, edge), -1.0, 1.0));
+
+    Manifold cyl = cylinder.Scale({1, 1, length});
+    if (la::length(axis) > 1e-10) {
+      axis = la::normalize(axis);
+      // Rodrigues rotation formula via Transform
+      double c = std::cos(angle);
+      double s = std::sin(angle);
+      double t = 1 - c;
+      mat3x4 rot = {{c + axis.x * axis.x * t, axis.x * axis.y * t + axis.z * s,
+                     axis.x * axis.z * t - axis.y * s},
+                    {axis.y * axis.x * t - axis.z * s, c + axis.y * axis.y * t,
+                     axis.y * axis.z * t + axis.x * s},
+                    {axis.z * axis.x * t + axis.y * s,
+                     axis.z * axis.y * t - axis.x * s, c + axis.z * axis.z * t},
+                    {0, 0, 0}};
+      cyl = cyl.Transform(rot);
+    }
+    batch[edgeOffset + i] = cyl.Translate(pImpl->vertPos_[halfedge.startVert]);
+  }
+
+  // Add spheres on convex vertices
+  for (size_t i = 0; i < convexVerts.size(); i++) {
+    batch[vertOffset + i] = sphere.Translate(pImpl->vertPos_[convexVerts[i]]);
+  }
+
+  return BatchBoolean(batch, inset ? OpType::Subtract : OpType::Add)
+      .AsOriginal();
+}
+
+/**
+ * Elegant offset implementation using circular arc wedges on edges and
+ * hulled sphere caps on vertices. Based on PR #669.
+ */
+Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
+  auto pImpl = GetCsgLeafNode().GetImpl();
+
+  const bool inset = delta < 0;
+  const double radius = std::abs(delta);
+  const int n =
+      circularSegments > 0 ? (circularSegments + 3) / 4
+                           : Quality::GetCircularSegments(radius) / 4;
+  const Manifold sphere = Manifold::Sphere(radius, 4 * n);
+  const Polygons triangle = {{{-1, -1}, {1, 0}, {0, 1}}};
+  const Manifold block = Manifold::Extrude(triangle, 1);
+
+  std::vector<Manifold> batch;
+  batch.push_back(*this);
+
+  // Extrude triangles
+  for (size_t tri = 0; tri < NumTri(); tri++) {
+    vec3 triPos[3];
+    for (int i = 0; i < 3; i++) {
+      triPos[i] = pImpl->vertPos_[pImpl->halfedge_[3 * tri + i].startVert];
+    }
+    const vec3 normal = radius * pImpl->faceNormal_[tri];
+    batch.push_back(block.Warp([triPos, normal](vec3& pos) {
+      vec3 offset = (pos.z > 0 ? normal : -normal);
+      if (pos.x < 0) {
+        pos = triPos[0] + offset;
+      } else if (pos.x > 0) {
+        pos = triPos[1] + offset;
+      } else {
+        pos = triPos[2] + offset;
+      }
+    }));
+  }
+
+  // Iterate over edges to find convex edges and build wedges
+  std::unordered_map<int, std::vector<vec3>> verticesToCenteredWedgePoints;
+
+  for (size_t idx = 0; idx < pImpl->halfedge_.size(); idx++) {
+    const Halfedge& edge = pImpl->halfedge_[idx];
+    if (!edge.IsForward()) continue;
+
+    const int face0 = idx / 3;
+    const int face1 = edge.pairedHalfedge / 3;
+    const vec3 normal0 = pImpl->faceNormal_[face0];
+    const vec3 normal1 = pImpl->faceNormal_[face1];
+
+    // Skip coplanar faces
+    if (la::length(normal0 - normal1) < 1e-10) continue;
+
+    const vec3 edgeVec =
+        pImpl->vertPos_[edge.endVert] - pImpl->vertPos_[edge.startVert];
+    const double convexity =
+        (inset ? -1.0 : 1.0) * la::dot(edgeVec, la::cross(normal0, normal1));
+
+    if (convexity > 0) {
+      // Compute wedge points by rotating around the edge from normal0 to
+      // normal1
+      vec3 edgeDir = la::normalize(edgeVec);
+      double angle = std::fmod(
+          std::atan2(la::dot(edgeDir, la::cross(normal0, normal1)),
+                     la::dot(normal0, normal1)),
+          2.0 * kPi);
+
+      int numSegments =
+          std::abs(static_cast<int>((angle / (2.0 * kPi)) * (n * 4)));
+      if (numSegments < 1) numSegments = 1;
+
+      std::vector<vec3> wedgePointsStart;
+      std::vector<vec3> wedgePointsEnd;
+
+      for (int seg = 0; seg <= numSegments; seg++) {
+        double alpha = static_cast<double>(seg) / numSegments;
+        // Rodrigues rotation
+        double c = std::cos(alpha * angle);
+        double s = std::sin(alpha * angle);
+        vec3 wedgePt =
+            c * normal0 + s * la::cross(edgeDir, normal0) +
+            (1 - c) * la::dot(edgeDir, normal0) * edgeDir;
+        wedgePt = delta * wedgePt;
+
+        wedgePointsStart.push_back(pImpl->vertPos_[edge.startVert] + wedgePt);
+        wedgePointsEnd.push_back(pImpl->vertPos_[edge.endVert] + wedgePt);
+      }
+
+      // Add wedge points for later sphere hull
+      verticesToCenteredWedgePoints[edge.startVert].insert(
+          verticesToCenteredWedgePoints[edge.startVert].end(),
+          wedgePointsStart.begin(), wedgePointsStart.end());
+      verticesToCenteredWedgePoints[edge.endVert].insert(
+          verticesToCenteredWedgePoints[edge.endVert].end(),
+          wedgePointsEnd.begin(), wedgePointsEnd.end());
+
+      // Build the wedge shape
+      std::vector<vec3> fullWedgePoints;
+      fullWedgePoints.push_back(pImpl->vertPos_[edge.startVert]);
+      fullWedgePoints.push_back(pImpl->vertPos_[edge.endVert]);
+      fullWedgePoints.insert(fullWedgePoints.end(), wedgePointsStart.begin(),
+                             wedgePointsStart.end());
+      fullWedgePoints.insert(fullWedgePoints.end(), wedgePointsEnd.begin(),
+                             wedgePointsEnd.end());
+      batch.push_back(Hull(fullWedgePoints));
+    }
+  }
+
+  // Hull the wedge points with spheres at convex vertices
+  for (auto& pair : verticesToCenteredWedgePoints) {
+    Manifold translatedSphere = sphere.Translate(pImpl->vertPos_[pair.first]);
+    auto sphereImpl = translatedSphere.GetCsgLeafNode().GetImpl();
+    for (const auto& v : sphereImpl->vertPos_) {
+      pair.second.push_back(v);
+    }
+    batch.push_back(Hull(pair.second));
+  }
+
+  return BatchBoolean(batch, inset ? OpType::Subtract : OpType::Add)
+      .AsOriginal();
 }
 
 /**

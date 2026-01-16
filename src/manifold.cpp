@@ -1281,16 +1281,14 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
   batch[0] = *this;
 
   // Extrude triangles using consistent quad diagonals based on vertex ordering
-  // Extrude from vertex in +normal direction for dilation, -normal for erosion
   for (size_t tri = 0; tri < NumTri(); tri++) {
     vec3 innerPos[3], outerPos[3];
     int origIdx[3];
     const vec3 normal = radius * pImpl->faceNormal_[tri];
-    const vec3 offset = inset ? -normal : normal;
     for (int i = 0; i < 3; i++) {
       origIdx[i] = pImpl->halfedge_[3 * tri + i].startVert;
-      innerPos[i] = pImpl->vertPos_[origIdx[i]];
-      outerPos[i] = pImpl->vertPos_[origIdx[i]] + offset;
+      innerPos[i] = pImpl->vertPos_[origIdx[i]] - normal;
+      outerPos[i] = pImpl->vertPos_[origIdx[i]] + normal;
     }
     batch[1 + tri] = MakePrism(innerPos, outerPos, origIdx);
   }
@@ -1355,16 +1353,14 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
   batch.push_back(*this);
 
   // Extrude triangles using consistent quad diagonals based on vertex ordering
-  // Extrude from vertex in +normal direction for dilation, -normal for erosion
   for (size_t tri = 0; tri < NumTri(); tri++) {
     vec3 innerPos[3], outerPos[3];
     int origIdx[3];
     const vec3 normal = radius * pImpl->faceNormal_[tri];
-    const vec3 offset = inset ? -normal : normal;
     for (int i = 0; i < 3; i++) {
       origIdx[i] = pImpl->halfedge_[3 * tri + i].startVert;
-      innerPos[i] = pImpl->vertPos_[origIdx[i]];
-      outerPos[i] = pImpl->vertPos_[origIdx[i]] + offset;
+      innerPos[i] = pImpl->vertPos_[origIdx[i]] - normal;
+      outerPos[i] = pImpl->vertPos_[origIdx[i]] + normal;
     }
     batch.push_back(MakePrism(innerPos, outerPos, origIdx));
   }

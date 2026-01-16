@@ -428,8 +428,6 @@ def run_tests(output_dir: str, deltas: List[float] = None,
     output_path.mkdir(parents=True, exist_ok=True)
     stl_dir = output_path / "stl"
     stl_dir.mkdir(exist_ok=True)
-    img_dir = output_path / "screenshots"
-    img_dir.mkdir(exist_ok=True)
 
     print(f"Output directory: {output_path.absolute()}")
     print(f"Circular segments: {circular_segments}")
@@ -441,11 +439,9 @@ def run_tests(output_dir: str, deltas: List[float] = None,
     print(f"Created {len(shapes)} test shapes: {list(shapes.keys())}")
 
     # Save original shapes
-    print("\nSaving original shapes...")
+    print("\nSaving original shapes...", flush=True)
     for name, shape in shapes.items():
         save_stl(shape, str(stl_dir / f"{name}_original.stl"))
-        save_screenshot(shape, str(img_dir / f"{name}_original.png"),
-                       f"{name} (original)", show_wireframe=True)
 
     all_results = []
     methods = [
@@ -475,10 +471,6 @@ def run_tests(output_dir: str, deltas: List[float] = None,
                     try:
                         save_stl(manifold, str(stl_dir / stl_filename))
                         result.stl_file = stl_filename
-                        save_screenshot(manifold,
-                                       str(img_dir / f"{shape_name}_{method_name}_{delta_str}.png"),
-                                       f"{shape_name} {method_name} delta={delta:+.2f}",
-                                       show_wireframe=True)
                     except Exception as e:
                         print(f"    Warning: Could not save {method_name} result: {e}")
 
@@ -508,10 +500,6 @@ def run_tests(output_dir: str, deltas: List[float] = None,
                 if final is not None and not final.is_empty():
                     save_stl(final, str(stl_dir / stl_filename))
                     r.stl_file = stl_filename
-                    save_screenshot(final,
-                                   str(img_dir / f"fun_shape_closing_{method_name}.png"),
-                                   f"fun_shape closing {method_name}",
-                                   show_wireframe=True)
 
         all_results.extend(morph_results)
 

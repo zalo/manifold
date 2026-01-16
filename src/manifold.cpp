@@ -1245,9 +1245,7 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
   const Manifold sphere = Manifold::Sphere(radius, 4 * n);
   const Manifold cylinder = Manifold::Cylinder(1, radius, radius, 4 * n);
 
-  // Find convex edges and vertices using tolerance to prevent slivers
-  // Use a tolerance based on radius to handle floating-point precision
-  const double convexityTol = radius * 1e-5;
+  // Find convex edges and vertices
   std::vector<int> convexEdges;
   std::vector<bool> vertConvex(NumVert(), false);
 
@@ -1265,7 +1263,7 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
     const double convexity =
         (inset ? -1.0 : 1.0) * la::dot(edgeVec, la::cross(normal0, normal1));
 
-    if (convexity > convexityTol) {
+    if (convexity > 0) {
       convexEdges.push_back(idx);
       vertConvex[edge.startVert] = true;
       vertConvex[edge.endVert] = true;
@@ -1353,9 +1351,6 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
                            : Quality::GetCircularSegments(radius) / 4;
   const Manifold sphere = Manifold::Sphere(radius, 4 * n);
 
-  // Use tolerance for convexity check to prevent slivers
-  const double convexityTol = radius * 1e-5;
-
   std::vector<Manifold> batch;
   batch.push_back(*this);
 
@@ -1394,7 +1389,7 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
     const double convexity =
         (inset ? -1.0 : 1.0) * la::dot(edgeVec, la::cross(normal0, normal1));
 
-    if (convexity > convexityTol) {
+    if (convexity > 0) {
       // Compute wedge points by rotating around the edge from normal0 to
       // normal1
       vec3 edgeDir = la::normalize(edgeVec);

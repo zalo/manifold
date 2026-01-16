@@ -1245,7 +1245,9 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
   const Manifold sphere = Manifold::Sphere(radius, 4 * n);
   const Manifold cylinder = Manifold::Cylinder(1, radius, radius, 4 * n);
 
-  // Find convex edges and vertices
+  // Find convex edges and vertices using tolerance to prevent slivers
+  // Use a tolerance based on radius to handle floating-point precision
+  const double convexityTol = radius * 1e-5;
   std::vector<int> convexEdges;
   std::vector<bool> vertConvex(NumVert(), false);
 
@@ -1263,7 +1265,7 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
     const double convexity =
         (inset ? -1.0 : 1.0) * la::dot(edgeVec, la::cross(normal0, normal1));
 
-    if (convexity > 0) {
+    if (convexity > convexityTol) {
       convexEdges.push_back(idx);
       vertConvex[edge.startVert] = true;
       vertConvex[edge.endVert] = true;
@@ -1281,14 +1283,16 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
   batch[0] = *this;
 
   // Extrude triangles using consistent quad diagonals based on vertex ordering
+  // Extrude from vertex in +normal direction for dilation, -normal for erosion
   for (size_t tri = 0; tri < NumTri(); tri++) {
     vec3 innerPos[3], outerPos[3];
     int origIdx[3];
     const vec3 normal = radius * pImpl->faceNormal_[tri];
+    const vec3 offset = inset ? -normal : normal;
     for (int i = 0; i < 3; i++) {
       origIdx[i] = pImpl->halfedge_[3 * tri + i].startVert;
-      innerPos[i] = pImpl->vertPos_[origIdx[i]] - normal;
-      outerPos[i] = pImpl->vertPos_[origIdx[i]] + normal;
+      innerPos[i] = pImpl->vertPos_[origIdx[i]];
+      outerPos[i] = pImpl->vertPos_[origIdx[i]] + offset;
     }
     batch[1 + tri] = MakePrism(innerPos, outerPos, origIdx);
   }
@@ -1349,18 +1353,23 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
                            : Quality::GetCircularSegments(radius) / 4;
   const Manifold sphere = Manifold::Sphere(radius, 4 * n);
 
+  // Use tolerance for convexity check to prevent slivers
+  const double convexityTol = radius * 1e-5;
+
   std::vector<Manifold> batch;
   batch.push_back(*this);
 
   // Extrude triangles using consistent quad diagonals based on vertex ordering
+  // Extrude from vertex in +normal direction for dilation, -normal for erosion
   for (size_t tri = 0; tri < NumTri(); tri++) {
     vec3 innerPos[3], outerPos[3];
     int origIdx[3];
     const vec3 normal = radius * pImpl->faceNormal_[tri];
+    const vec3 offset = inset ? -normal : normal;
     for (int i = 0; i < 3; i++) {
       origIdx[i] = pImpl->halfedge_[3 * tri + i].startVert;
-      innerPos[i] = pImpl->vertPos_[origIdx[i]] - normal;
-      outerPos[i] = pImpl->vertPos_[origIdx[i]] + normal;
+      innerPos[i] = pImpl->vertPos_[origIdx[i]];
+      outerPos[i] = pImpl->vertPos_[origIdx[i]] + offset;
     }
     batch.push_back(MakePrism(innerPos, outerPos, origIdx));
   }
@@ -1385,7 +1394,7 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
     const double convexity =
         (inset ? -1.0 : 1.0) * la::dot(edgeVec, la::cross(normal0, normal1));
 
-    if (convexity > 0) {
+    if (convexity > convexityTol) {
       // Compute wedge points by rotating around the edge from normal0 to
       // normal1
       vec3 edgeDir = la::normalize(edgeVec);

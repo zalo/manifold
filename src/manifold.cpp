@@ -28,6 +28,73 @@ using namespace manifold;
 
 ExecutionParams manifoldParams;
 
+// Creates a prism extruding a triangle from innerPos to outerPos.
+// The quad diagonal direction is determined by comparing original vertex
+// indices (origIdx) to ensure adjacent triangles sharing an edge use the
+// same diagonal, preventing slivers.
+Manifold MakePrism(const vec3 innerPos[3], const vec3 outerPos[3],
+                   const int origIdx[3]) {
+  MeshGL prism;
+  prism.numProp = 3;
+
+  // Add vertices: for each triangle vertex, inner then outer
+  // Vertex layout: 0=inner0, 1=outer0, 2=inner1, 3=outer1, 4=inner2, 5=outer2
+  for (int v = 0; v < 3; v++) {
+    // Inner vertex (2*v)
+    prism.vertProperties.push_back(static_cast<float>(innerPos[v].x));
+    prism.vertProperties.push_back(static_cast<float>(innerPos[v].y));
+    prism.vertProperties.push_back(static_cast<float>(innerPos[v].z));
+    // Outer vertex (2*v + 1)
+    prism.vertProperties.push_back(static_cast<float>(outerPos[v].x));
+    prism.vertProperties.push_back(static_cast<float>(outerPos[v].y));
+    prism.vertProperties.push_back(static_cast<float>(outerPos[v].z));
+  }
+
+  // Inner face (reversed winding): vertices 4, 2, 0
+  prism.triVerts.push_back(4);
+  prism.triVerts.push_back(2);
+  prism.triVerts.push_back(0);
+  // Outer face (normal winding): vertices 1, 3, 5
+  prism.triVerts.push_back(1);
+  prism.triVerts.push_back(3);
+  prism.triVerts.push_back(5);
+
+  // Add quad faces for each edge, with diagonal based on original vertex order
+  for (int v0 = 0; v0 < 3; v0++) {
+    const int v1 = (v0 + 1) % 3;
+    const int idx0 = origIdx[v0];
+    const int idx1 = origIdx[v1];
+
+    // Prism vertex indices for this edge
+    const uint32_t inner0 = 2 * v0;
+    const uint32_t outer0 = 2 * v0 + 1;
+    const uint32_t inner1 = 2 * v1;
+    const uint32_t outer1 = 2 * v1 + 1;
+
+    // Choose diagonal based on original vertex index ordering
+    // This ensures adjacent triangles use the same diagonal for shared edges
+    if (idx1 > idx0) {
+      // Diagonal from inner0 to outer1
+      prism.triVerts.push_back(inner0);
+      prism.triVerts.push_back(inner1);
+      prism.triVerts.push_back(outer1);
+      prism.triVerts.push_back(inner0);
+      prism.triVerts.push_back(outer1);
+      prism.triVerts.push_back(outer0);
+    } else {
+      // Diagonal from inner1 to outer0
+      prism.triVerts.push_back(inner0);
+      prism.triVerts.push_back(inner1);
+      prism.triVerts.push_back(outer0);
+      prism.triVerts.push_back(inner1);
+      prism.triVerts.push_back(outer1);
+      prism.triVerts.push_back(outer0);
+    }
+  }
+
+  return Manifold(prism);
+}
+
 Manifold Halfspace(Box bBox, vec3 normal, double originOffset) {
   normal = la::normalize(normal);
   Manifold cutter = Manifold::Cube(vec3(2.0), true).Translate({1.0, 0.0, 0.0});
@@ -1177,8 +1244,6 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
                            : Quality::GetCircularSegments(radius) / 4;
   const Manifold sphere = Manifold::Sphere(radius, 4 * n);
   const Manifold cylinder = Manifold::Cylinder(1, radius, radius, 4 * n);
-  const Polygons triangle = {{{-1, -1}, {1, 0}, {0, 1}}};
-  const Manifold block = Manifold::Extrude(triangle, 1);
 
   // Find convex edges and vertices
   std::vector<int> convexEdges;
@@ -1215,24 +1280,17 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
   std::vector<Manifold> batch(vertOffset + convexVerts.size());
   batch[0] = *this;
 
-  // Extrude triangles
+  // Extrude triangles using consistent quad diagonals based on vertex ordering
   for (size_t tri = 0; tri < NumTri(); tri++) {
-    vec3 triPos[3];
-    for (int i = 0; i < 3; i++) {
-      triPos[i] = pImpl->vertPos_[pImpl->halfedge_[3 * tri + i].startVert];
-    }
+    vec3 innerPos[3], outerPos[3];
+    int origIdx[3];
     const vec3 normal = radius * pImpl->faceNormal_[tri];
-    batch[1 + tri] = block.Warp([triPos, normal](vec3& pos) {
-      const double dir = pos.z > 0 ? 1.0 : -1.0;
-      if (pos.x < 0) {
-        pos = triPos[0];
-      } else if (pos.x > 0) {
-        pos = triPos[1];
-      } else {
-        pos = triPos[2];
-      }
-      pos += dir * normal;
-    });
+    for (int i = 0; i < 3; i++) {
+      origIdx[i] = pImpl->halfedge_[3 * tri + i].startVert;
+      innerPos[i] = pImpl->vertPos_[origIdx[i]] - normal;
+      outerPos[i] = pImpl->vertPos_[origIdx[i]] + normal;
+    }
+    batch[1 + tri] = MakePrism(innerPos, outerPos, origIdx);
   }
 
   // Add cylinders on convex edges
@@ -1290,29 +1348,21 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
       circularSegments > 0 ? (circularSegments + 3) / 4
                            : Quality::GetCircularSegments(radius) / 4;
   const Manifold sphere = Manifold::Sphere(radius, 4 * n);
-  const Polygons triangle = {{{-1, -1}, {1, 0}, {0, 1}}};
-  const Manifold block = Manifold::Extrude(triangle, 1);
 
   std::vector<Manifold> batch;
   batch.push_back(*this);
 
-  // Extrude triangles
+  // Extrude triangles using consistent quad diagonals based on vertex ordering
   for (size_t tri = 0; tri < NumTri(); tri++) {
-    vec3 triPos[3];
-    for (int i = 0; i < 3; i++) {
-      triPos[i] = pImpl->vertPos_[pImpl->halfedge_[3 * tri + i].startVert];
-    }
+    vec3 innerPos[3], outerPos[3];
+    int origIdx[3];
     const vec3 normal = radius * pImpl->faceNormal_[tri];
-    batch.push_back(block.Warp([triPos, normal](vec3& pos) {
-      vec3 offset = (pos.z > 0 ? normal : -normal);
-      if (pos.x < 0) {
-        pos = triPos[0] + offset;
-      } else if (pos.x > 0) {
-        pos = triPos[1] + offset;
-      } else {
-        pos = triPos[2] + offset;
-      }
-    }));
+    for (int i = 0; i < 3; i++) {
+      origIdx[i] = pImpl->halfedge_[3 * tri + i].startVert;
+      innerPos[i] = pImpl->vertPos_[origIdx[i]] - normal;
+      outerPos[i] = pImpl->vertPos_[origIdx[i]] + normal;
+    }
+    batch.push_back(MakePrism(innerPos, outerPos, origIdx));
   }
 
   // Iterate over edges to find convex edges and build wedges

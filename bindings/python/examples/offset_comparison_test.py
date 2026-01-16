@@ -456,19 +456,18 @@ def run_tests(output_dir: str, deltas: List[float] = None,
 
     # Test each shape with each method and delta
     for shape_name, shape in shapes.items():
-        print(f"\nTesting {shape_name}...")
+        print(f"\nTesting {shape_name}...", flush=True)
 
         for delta in deltas:
             delta_str = f"d{delta:+.2f}".replace(".", "p").replace("+", "pos").replace("-", "neg")
 
             for method, method_name in methods:
+                print(f"  Starting {method_name} delta={delta:+.2f}...", end=" ", flush=True)
                 result, manifold = test_offset_method(shape, shape_name, delta,
                                            circular_segments, method, method_name)
 
-                if verbose:
-                    status = "ERROR" if result.error else ("EMPTY" if result.is_empty else "OK")
-                    print(f"  {method_name} delta={delta:+.2f}: {result.time_ms:.1f}ms, "
-                          f"{result.num_tris} tris, {status}")
+                status = "ERROR" if result.error else ("EMPTY" if result.is_empty else "OK")
+                print(f"{result.time_ms:.1f}ms, {result.num_tris} tris, {status}", flush=True)
 
                 # Save results
                 stl_filename = f"{shape_name}_{method_name}_{delta_str}.stl"
@@ -486,16 +485,21 @@ def run_tests(output_dir: str, deltas: List[float] = None,
                 all_results.append(result)
 
             # Also test direct minkowski for comparison
+            print(f"  Starting minkowski_direct delta={delta:+.2f}...", end=" ", flush=True)
             result, _ = test_minkowski_method(shape, shape_name, delta, circular_segments)
+            status = "ERROR" if result.error else ("EMPTY" if result.is_empty else "OK")
+            print(f"{result.time_ms:.1f}ms, {result.num_tris} tris, {status}", flush=True)
             all_results.append(result)
 
     # Test morphological operations on fun_shape
-    print("\nTesting morphological operations on fun_shape...")
+    print("\nTesting morphological operations on fun_shape...", flush=True)
     fun_shape = shapes['fun_shape']
 
     for method, method_name in methods:
+        print(f"  Starting morphological {method_name}...", end=" ", flush=True)
         morph_results, final = test_morphological_operations(
             fun_shape, "fun_shape", 0.1, circular_segments, method, method_name)
+        print(f"done ({len(morph_results)} results)", flush=True)
 
         # Set STL filenames for morphological results
         for r in morph_results:

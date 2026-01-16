@@ -15,6 +15,7 @@ import sys
 import time
 import json
 import argparse
+import subprocess
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -90,6 +91,36 @@ def compute_genus(m: Manifold) -> int:
     # genus = (2 - euler) / 2 for closed surfaces
     genus = (2 - euler) // 2
     return max(0, genus)  # Genus should be non-negative
+
+
+def get_git_info() -> dict:
+    """Get current git commit hash and repository URL."""
+    info = {"commit_hash": None, "repo_url": None}
+    try:
+        # Get commit hash
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            info["commit_hash"] = result.stdout.strip()
+
+        # Get remote URL and convert to https
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            # Convert git@github.com:user/repo.git to https://github.com/user/repo
+            if url.startswith("git@"):
+                url = url.replace(":", "/").replace("git@", "https://")
+            if url.endswith(".git"):
+                url = url[:-4]
+            info["repo_url"] = url
+    except Exception:
+        pass
+    return info
 
 
 def manifold_to_trimesh(m: Manifold) -> Optional['trimesh.Trimesh']:
@@ -496,8 +527,11 @@ def run_tests(output_dir: str, deltas: List[float] = None,
 
     # Generate JSON for web viewer
     json_path = output_path / "comparison_data.json"
+    git_info = get_git_info()
     json_data = {
         "timestamp": datetime.now().isoformat(),
+        "commit_hash": git_info["commit_hash"],
+        "repo_url": git_info["repo_url"],
         "circular_segments": circular_segments,
         "deltas": deltas,
         "results": []

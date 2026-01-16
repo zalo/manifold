@@ -324,6 +324,7 @@ struct Manifold::Impl {
   bool IsSelfIntersecting() const;
   bool MatchesTriNormals() const;
   int NumDegenerateTris() const;
+  bool IsConvex() const;
   double MinGap(const Impl& other, double searchLength) const;
 
   // sort.cpp

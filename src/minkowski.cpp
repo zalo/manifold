@@ -15,7 +15,33 @@
 #include "impl.h"
 #include "parallel.h"
 
+#include <stdio.h>
+#include <string.h>
+#ifdef __linux__
+#include <stdlib.h>
+#endif
+
 namespace manifold {
+
+// Get current memory usage in MB (Linux only, returns -1 on other platforms)
+static long getMemoryUsageMB() {
+#ifdef __linux__
+  FILE* status = fopen("/proc/self/status", "r");
+  if (!status) return -1;
+  char line[256];
+  long kb = -1;
+  while (fgets(line, sizeof(line), status)) {
+    if (strncmp(line, "VmRSS:", 6) == 0) {
+      sscanf(line, "VmRSS: %ld kB", &kb);
+      break;
+    }
+  }
+  fclose(status);
+  return kb >= 0 ? kb / 1024 : -1;
+#else
+  return -1;
+#endif
+}
 
 /**
  * Compute the minkowski sum of two manifolds.
@@ -90,80 +116,103 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
       composedHulls.push_back(Manifold::BatchBoolean(newHulls, OpType::Add));
     }
     // Non-Convex - Non-Convex Minkowski: Very Slow
-    // Process batches sequentially to conserve memory, merging each batch's
-    // result into a running total instead of accumulating all batch results.
+    // Process A faces sequentially with periodic batch reduction to balance
+    // memory usage and performance.
   } else if (!aConvex && !bConvex) {
     const size_t numTriA = aImpl->NumTri();
     const size_t numTriB = bImpl->NumTri();
-    const size_t totalPairs = numTriA * numTriB;
 
-    // Running total that accumulates batch results sequentially
-    Manifold runningTotal;
-    bool hasResult = false;
+    // Reduce accumulated results after this many A faces to limit memory
+    // More aggressive batching (lower threshold) to handle large meshes
+    constexpr size_t REDUCE_THRESHOLD = 50;
 
-    // Process face pairs in batches with parallelization
-    for (size_t offset = 0; offset < totalPairs; offset += BATCH_SIZE) {
-      size_t numIter = std::min(totalPairs - offset, BATCH_SIZE);
-      std::vector<Manifold> newHulls(numIter);
-      std::vector<bool> validHull(numIter, false);
+    // Log initial memory and operation parameters
+    long memStart = getMemoryUsageMB();
+    if (memStart >= 0) {
+      printf("[NC-NC Minkowski] Starting: %zu x %zu faces, threshold=%zu, "
+             "initial memory=%ld MB\n",
+             numTriA, numTriB, REDUCE_THRESHOLD, memStart);
+    }
+
+    // Accumulated per-A-face results (periodically reduced)
+    std::vector<Manifold> accumulated;
+    accumulated.reserve(std::min(numTriA, REDUCE_THRESHOLD));
+
+    // Process each A face sequentially
+    for (size_t aFace = 0; aFace < numTriA; ++aFace) {
+      vec3 a1 = aImpl->vertPos_[aImpl->halfedge_[(aFace * 3) + 0].startVert];
+      vec3 a2 = aImpl->vertPos_[aImpl->halfedge_[(aFace * 3) + 1].startVert];
+      vec3 a3 = aImpl->vertPos_[aImpl->halfedge_[(aFace * 3) + 2].startVert];
+      vec3 nA = aImpl->faceNormal_[aFace];
+
+      // Create hulls for all B faces paired with this A face (parallel)
+      std::vector<Manifold> faceHulls(numTriB);
+      std::vector<bool> validHull(numTriB, false);
 
       for_each_n(
-          autoPolicy(numIter, 100), countAt(0), numIter, [&](const int iter) {
-            size_t pairIdx = offset + iter;
-            size_t aFace = pairIdx / numTriB;
-            size_t bFace = pairIdx % numTriB;
-
-            // Use tolerance-based coplanarity check instead of exact equality
-            // to handle floating-point precision issues from scaling
+          autoPolicy(numTriB, 100), countAt(0), numTriB, [&](const int bFace) {
             constexpr double kCoplanarTol = 1e-15;
-            vec3 nA = aImpl->faceNormal_[aFace];
             vec3 nB = bImpl->faceNormal_[bFace];
             double dotSame = linalg::dot(nA, nB);
             double dotOpp = linalg::dot(nA, -nB);
             const bool coplanar = (std::abs(dotSame - 1.0) < kCoplanarTol) ||
                                   (std::abs(dotOpp - 1.0) < kCoplanarTol);
-            if (coplanar) return;  // Skip Coplanar Triangles
+            if (coplanar) return;
 
-            vec3 a1 =
-                aImpl->vertPos_[aImpl->halfedge_[(aFace * 3) + 0].startVert];
-            vec3 a2 =
-                aImpl->vertPos_[aImpl->halfedge_[(aFace * 3) + 1].startVert];
-            vec3 a3 =
-                aImpl->vertPos_[aImpl->halfedge_[(aFace * 3) + 2].startVert];
             vec3 b1 =
                 bImpl->vertPos_[bImpl->halfedge_[(bFace * 3) + 0].startVert];
             vec3 b2 =
                 bImpl->vertPos_[bImpl->halfedge_[(bFace * 3) + 1].startVert];
             vec3 b3 =
                 bImpl->vertPos_[bImpl->halfedge_[(bFace * 3) + 2].startVert];
-            newHulls[iter] =
+            faceHulls[bFace] =
                 Manifold::Hull({a1 + b1, a1 + b2, a1 + b3, a2 + b1, a2 + b2,
                                 a2 + b3, a3 + b1, a3 + b2, a3 + b3});
-            validHull[iter] = true;
+            validHull[bFace] = true;
           });
 
-      // Collect valid (non-coplanar) hulls and merge with running total
-      std::vector<Manifold> batchHulls;
-      for (size_t i = 0; i < numIter; ++i) {
+      // Collect valid hulls for this A face
+      std::vector<Manifold> validFaceHulls;
+      for (size_t i = 0; i < numTriB; ++i) {
         if (validHull[i]) {
-          batchHulls.push_back(std::move(newHulls[i]));
+          validFaceHulls.push_back(std::move(faceHulls[i]));
         }
       }
-      if (!batchHulls.empty()) {
-        Manifold batchResult = Manifold::BatchBoolean(batchHulls, OpType::Add);
-        if (hasResult) {
-          // Merge batch result with running total immediately to save memory
-          runningTotal = runningTotal + batchResult;
-        } else {
-          runningTotal = std::move(batchResult);
-          hasResult = true;
+
+      if (!validFaceHulls.empty()) {
+        accumulated.push_back(
+            Manifold::BatchBoolean(validFaceHulls, OpType::Add));
+      }
+
+      // Periodically reduce to limit memory usage
+      if (accumulated.size() >= REDUCE_THRESHOLD) {
+        long memBefore = getMemoryUsageMB();
+        Manifold reduced = Manifold::BatchBoolean(accumulated, OpType::Add);
+        int reducedTris = reduced.NumTri();
+        accumulated.clear();
+        accumulated.push_back(std::move(reduced));
+        long memAfter = getMemoryUsageMB();
+        if (memBefore >= 0) {
+          printf("[NC-NC Minkowski] Reduced at face %zu/%zu: "
+                 "memory %ld -> %ld MB (reduced has %d tris)\n",
+                 aFace + 1, numTriA, memBefore, memAfter, reducedTris);
         }
       }
     }
 
-    // Add the accumulated NC-NC result to composedHulls for final merge
-    if (hasResult) {
-      composedHulls.push_back(std::move(runningTotal));
+    // Final merge of remaining accumulated results
+    if (!accumulated.empty()) {
+      long memFinal = getMemoryUsageMB();
+      if (memFinal >= 0) {
+        printf("[NC-NC Minkowski] Final merge: %zu items, memory=%ld MB\n",
+               accumulated.size(), memFinal);
+      }
+      composedHulls.push_back(
+          Manifold::BatchBoolean(accumulated, OpType::Add));
+      long memEnd = getMemoryUsageMB();
+      if (memEnd >= 0) {
+        printf("[NC-NC Minkowski] Complete: final memory=%ld MB\n", memEnd);
+      }
     }
   }
   return Manifold::BatchBoolean(composedHulls, inset

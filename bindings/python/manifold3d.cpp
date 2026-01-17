@@ -17,6 +17,7 @@
 
 #include "cross_section.h"
 #include "manifold.h"
+#include "tetrahedralization.h"
 #include "nanobind/nanobind.h"
 #include "nanobind/ndarray.h"
 #include "nanobind/operators.h"
@@ -963,4 +964,73 @@ NB_MODULE(manifold3d, m) {
           ":param circularSegments: Number of segments along its diameter. "
           "Default is calculated by the static Quality defaults according to "
           "the radius.");
+
+  // TetMesh class for tetrahedralization results
+  nb::class_<TetMesh>(m, "TetMesh")
+      .def(nb::init<>())
+      .def_prop_ro(
+          "vert_pos",
+          [](const TetMesh &self) {
+            return nb::ndarray<nb::numpy, const float, nb::c_contig>(
+                reinterpret_cast<const float *>(self.vertPos.data()),
+                {self.vertPos.size(), 3});
+          },
+          nb::rv_policy::reference_internal,
+          "The X-Y-Z positions of all vertices as a numpy array of shape "
+          "(num_verts, 3).")
+      .def_prop_ro(
+          "tet_verts",
+          [](const TetMesh &self) {
+            return nb::ndarray<nb::numpy, const uint32_t, nb::c_contig>(
+                reinterpret_cast<const uint32_t *>(self.tetVerts.data()),
+                {self.tetVerts.size(), 4});
+          },
+          nb::rv_policy::reference_internal,
+          "The vertex indices of each tetrahedron as a numpy array of shape "
+          "(num_tets, 4).")
+      .def_prop_ro(
+          "num_tet", [](const TetMesh &self) { return self.NumTet(); },
+          "Number of tetrahedra.")
+      .def_prop_ro(
+          "num_vert", [](const TetMesh &self) { return self.NumVert(); },
+          "Number of vertices.");
+
+  // Module-level tetrahedralization functions
+  m.def(
+      "delaunay_tetrahedralization",
+      [](std::vector<Float3> &points, float minQuality) {
+        std::vector<glm::vec3> pts(points.size());
+        for (size_t i = 0; i < points.size(); i++) {
+          pts[i] = glm::vec3(std::get<0>(points[i]), std::get<1>(points[i]),
+                             std::get<2>(points[i]));
+        }
+        return DelaunayTetrahedralization(pts, minQuality);
+      },
+      nb::arg("points"), nb::arg("min_quality") = 0.0f,
+      "Performs unconstrained Delaunay tetrahedralization on a set of 3D "
+      "points.\n\n"
+      ":param points: List of 3D points as tuples (x, y, z).\n"
+      ":param min_quality: Minimum tetrahedron quality threshold (0.0 to 1.0). "
+      "Tetrahedra with quality below this are filtered out. Default is 0.0 (no "
+      "filtering).\n"
+      ":return: TetMesh containing vertices and tetrahedra indices.");
+
+  m.def(
+      "constrained_delaunay_tetrahedralization",
+      [](Manifold &manifold, float minQuality, int maxSteinerIterations) {
+        return ConstrainedDelaunayTetrahedralization(manifold, minQuality,
+                                                     maxSteinerIterations);
+      },
+      nb::arg("manifold"), nb::arg("min_quality") = 0.0f,
+      nb::arg("max_steiner_iterations") = 100,
+      "Performs constrained Delaunay tetrahedralization on a manifold mesh.\n"
+      "This ensures all surface triangles of the input manifold are present "
+      "as faces of tetrahedra in the output. Steiner points are added at "
+      "triangle centroids when needed to recover missing surface triangles.\n\n"
+      ":param manifold: The input manifold mesh to tetrahedralize.\n"
+      ":param min_quality: Minimum tetrahedron quality threshold (0.0 to 1.0).\n"
+      ":param max_steiner_iterations: Maximum number of Steiner point insertion "
+      "iterations. Default is 100.\n"
+      ":return: TetMesh containing vertices (including any Steiner points) and "
+      "tetrahedra indices.");
 }

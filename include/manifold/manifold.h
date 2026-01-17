@@ -520,7 +520,6 @@ class Manifold {
 
   CsgLeafNode& GetCsgLeafNode() const;
 
-  Manifold Minkowski(const Manifold&, bool inset = false) const;
   Manifold OffsetSimple(double delta, int circularSegments) const;
   Manifold OffsetElegant(double delta, int circularSegments) const;
 };

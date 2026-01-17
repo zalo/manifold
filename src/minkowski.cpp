@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "impl.h"
-#include "parallel.h"
-
 #include <stdio.h>
 #include <string.h>
+
+#include "impl.h"
+#include "parallel.h"
 #ifdef __linux__
 #include <stdlib.h>
 #endif
@@ -76,7 +76,11 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
 
   std::shared_ptr<Impl> aImplCopy = std::make_shared<Impl>(*aImpl);
   Manifold a(aImplCopy);
-  std::vector<Manifold> composedHulls({a});
+  std::vector<Manifold> composedHulls;
+  // Reserve space: 1 for base + batches for non-convex cases
+  size_t numBatches = (aImpl->NumTri() + BATCH_SIZE - 1) / BATCH_SIZE;
+  composedHulls.reserve(1 + numBatches);
+  composedHulls.push_back(a);
 
   // Convex-Convex Minkowski: Very Fast
   if (!inset && aConvex && bConvex) {
@@ -129,9 +133,10 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
     // Log initial memory and operation parameters
     long memStart = getMemoryUsageMB();
     if (memStart >= 0) {
-      printf("[NC-NC Minkowski] Starting: %zu x %zu faces, threshold=%zu, "
-             "initial memory=%ld MB\n",
-             numTriA, numTriB, REDUCE_THRESHOLD, memStart);
+      printf(
+          "[NC-NC Minkowski] Starting: %zu x %zu faces, threshold=%zu, "
+          "initial memory=%ld MB\n",
+          numTriA, numTriB, REDUCE_THRESHOLD, memStart);
     }
 
     // Accumulated per-A-face results (periodically reduced)
@@ -147,7 +152,6 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
 
       // Create hulls for all B faces paired with this A face (parallel)
       std::vector<Manifold> faceHulls(numTriB);
-      std::vector<bool> validHull(numTriB, false);
 
       for_each_n(
           autoPolicy(numTriB, 100), countAt(0), numTriB, [&](const int bFace) {
@@ -168,14 +172,13 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
             faceHulls[bFace] =
                 Manifold::Hull({a1 + b1, a1 + b2, a1 + b3, a2 + b1, a2 + b2,
                                 a2 + b3, a3 + b1, a3 + b2, a3 + b3});
-            validHull[bFace] = true;
           });
 
-      // Collect valid hulls for this A face
+      // Collect non-empty hulls for this A face
       std::vector<Manifold> validFaceHulls;
-      for (size_t i = 0; i < numTriB; ++i) {
-        if (validHull[i]) {
-          validFaceHulls.push_back(std::move(faceHulls[i]));
+      for (auto& hull : faceHulls) {
+        if (!hull.IsEmpty()) {
+          validFaceHulls.push_back(std::move(hull));
         }
       }
 
@@ -193,9 +196,10 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
         accumulated.push_back(std::move(reduced));
         long memAfter = getMemoryUsageMB();
         if (memBefore >= 0) {
-          printf("[NC-NC Minkowski] Reduced at face %zu/%zu: "
-                 "memory %ld -> %ld MB (reduced has %d tris)\n",
-                 aFace + 1, numTriA, memBefore, memAfter, reducedTris);
+          printf(
+              "[NC-NC Minkowski] Reduced at face %zu/%zu: "
+              "memory %ld -> %ld MB (reduced has %d tris)\n",
+              aFace + 1, numTriA, memBefore, memAfter, reducedTris);
         }
       }
     }
@@ -207,8 +211,7 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
         printf("[NC-NC Minkowski] Final merge: %zu items, memory=%ld MB\n",
                accumulated.size(), memFinal);
       }
-      composedHulls.push_back(
-          Manifold::BatchBoolean(accumulated, OpType::Add));
+      composedHulls.push_back(Manifold::BatchBoolean(accumulated, OpType::Add));
       long memEnd = getMemoryUsageMB();
       if (memEnd >= 0) {
         printf("[NC-NC Minkowski] Complete: final memory=%ld MB\n", memEnd);

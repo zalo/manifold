@@ -1087,35 +1087,33 @@ Manifold Manifold::TrimByPlane(vec3 normal, double originOffset) const {
 }
 
 /**
- * Compute the minkowski sum of two manifolds.
- *
- * @param other The other manifold to minkowski sum to this one.
- * @param inset Whether it should add or subtract from the manifold.
- */
-Manifold Manifold::Minkowski(const Manifold& other, bool inset) const {
-  auto aImpl = GetCsgLeafNode().GetImpl();
-  auto bImpl = other.GetCsgLeafNode().GetImpl();
-  return aImpl->Minkowski(*bImpl, inset);
-}
-
-/**
  * Compute the minkowski sum of this manifold with another.
  * This corresponds to the morphological dilation of the manifold.
+ *
+ * @note Performance is best when using convex objects. For non-convex inputs,
+ * performance scales with the product of face counts, so keep face counts low.
  *
  * @param other The other manifold to minkowski sum to this one.
  */
 Manifold Manifold::MinkowskiSum(const Manifold& other) const {
-  return this->Minkowski(other, false);
+  auto aImpl = GetCsgLeafNode().GetImpl();
+  auto bImpl = other.GetCsgLeafNode().GetImpl();
+  return aImpl->Minkowski(*bImpl, false);
 }
 
 /**
  * Subtract the sweep of the other manifold across this manifold's surface.
  * This corresponds to the morphological erosion of the manifold.
  *
+ * @note Performance is best when using convex objects. For non-convex inputs,
+ * performance scales with the product of face counts, so keep face counts low.
+ *
  * @param other The other manifold to minkowski subtract from this one.
  */
 Manifold Manifold::MinkowskiDifference(const Manifold& other) const {
-  return this->Minkowski(other, true);
+  auto aImpl = GetCsgLeafNode().GetImpl();
+  auto bImpl = other.GetCsgLeafNode().GetImpl();
+  return aImpl->Minkowski(*bImpl, true);
 }
 
 /**
@@ -1166,9 +1164,8 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
 
   const bool inset = delta < 0;
   const double radius = std::abs(delta);
-  const int n =
-      circularSegments > 0 ? (circularSegments + 3) / 4
-                           : Quality::GetCircularSegments(radius) / 4;
+  const int n = circularSegments > 0 ? (circularSegments + 3) / 4
+                                     : Quality::GetCircularSegments(radius) / 4;
   const Manifold sphere = Manifold::Sphere(radius, 4 * n);
   const Manifold cylinder = Manifold::Cylinder(1, radius, radius, 4 * n);
 
@@ -1225,8 +1222,8 @@ Manifold Manifold::OffsetSimple(double delta, int circularSegments) const {
   // Add cylinders on convex edges
   for (size_t i = 0; i < convexEdges.size(); i++) {
     const Halfedge& halfedge = pImpl->halfedge_[convexEdges[i]];
-    vec3 edge = pImpl->vertPos_[halfedge.endVert] -
-                pImpl->vertPos_[halfedge.startVert];
+    vec3 edge =
+        pImpl->vertPos_[halfedge.endVert] - pImpl->vertPos_[halfedge.startVert];
     const double length = la::length(edge);
     if (length < 1e-10) continue;
 
@@ -1273,9 +1270,8 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
 
   const bool inset = delta < 0;
   const double radius = std::abs(delta);
-  const int n =
-      circularSegments > 0 ? (circularSegments + 3) / 4
-                           : Quality::GetCircularSegments(radius) / 4;
+  const int n = circularSegments > 0 ? (circularSegments + 3) / 4
+                                     : Quality::GetCircularSegments(radius) / 4;
   const Manifold sphere = Manifold::Sphere(radius, 4 * n);
 
   // Use small tolerance to handle floating-point precision
@@ -1321,10 +1317,10 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
       // Compute wedge points by rotating around the edge from normal0 to
       // normal1
       vec3 edgeDir = la::normalize(edgeVec);
-      double angle = std::fmod(
-          std::atan2(la::dot(edgeDir, la::cross(normal0, normal1)),
-                     la::dot(normal0, normal1)),
-          2.0 * kPi);
+      double angle =
+          std::fmod(std::atan2(la::dot(edgeDir, la::cross(normal0, normal1)),
+                               la::dot(normal0, normal1)),
+                    2.0 * kPi);
 
       int numSegments =
           std::abs(static_cast<int>((angle / (2.0 * kPi)) * (n * 4)));
@@ -1338,9 +1334,8 @@ Manifold Manifold::OffsetElegant(double delta, int circularSegments) const {
         // Rodrigues rotation
         double c = std::cos(alpha * angle);
         double s = std::sin(alpha * angle);
-        vec3 wedgePt =
-            c * normal0 + s * la::cross(edgeDir, normal0) +
-            (1 - c) * la::dot(edgeDir, normal0) * edgeDir;
+        vec3 wedgePt = c * normal0 + s * la::cross(edgeDir, normal0) +
+                       (1 - c) * la::dot(edgeDir, normal0) * edgeDir;
         wedgePt = delta * wedgePt;
 
         wedgePointsStart.push_back(pImpl->vertPos_[edge.startVert] + wedgePt);

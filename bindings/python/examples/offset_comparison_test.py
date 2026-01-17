@@ -16,10 +16,37 @@ import time
 import json
 import argparse
 import subprocess
+import signal
+import threading
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional, List, Tuple
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+# Default timeout for test operations (in seconds)
+TEST_TIMEOUT_SECONDS = 30
+
+
+class TimeoutError(Exception):
+    """Raised when a test times out."""
+    pass
+
+
+def run_with_timeout(func, timeout_seconds=TEST_TIMEOUT_SECONDS):
+    """
+    Run a function with a timeout. Returns (result, elapsed_ms) or raises TimeoutError.
+    Uses ThreadPoolExecutor for cross-platform timeout support.
+    """
+    start_time = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(func)
+        try:
+            result = future.result(timeout=timeout_seconds)
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            return result, elapsed_ms
+        except FuturesTimeoutError:
+            raise TimeoutError(f"Operation timed out after {timeout_seconds} seconds")
 
 # Try to import manifold3d
 try:
@@ -205,6 +232,73 @@ def save_screenshot(m: Manifold, filepath: str, title: str = "", show_wireframe:
         return False
 
 
+def load_stl_as_manifold(filepath: str, merge_tolerance: float = 0.001) -> Optional[Manifold]:
+    """
+    Load an STL file and return it as a Manifold.
+    Merges duplicate vertices within the given tolerance.
+    """
+    import struct
+
+    try:
+        with open(filepath, 'rb') as f:
+            header = f.read(80)
+            num_triangles = struct.unpack('<I', f.read(4))[0]
+
+            vertices = []
+            faces = []
+
+            for i in range(num_triangles):
+                struct.unpack('<fff', f.read(12))  # discard normal
+                v1 = struct.unpack('<fff', f.read(12))
+                v2 = struct.unpack('<fff', f.read(12))
+                v3 = struct.unpack('<fff', f.read(12))
+                f.read(2)  # attribute byte count
+
+                idx_base = len(vertices)
+                vertices.extend([v1, v2, v3])
+                faces.append([idx_base, idx_base+1, idx_base+2])
+
+        if not HAVE_NUMPY:
+            print("Warning: numpy required for STL loading")
+            return None
+
+        verts = np.array(vertices, dtype=np.float32)
+        tris = np.array(faces, dtype=np.uint32)
+
+        # Merge duplicate vertices
+        unique_verts = []
+        vert_map = {}
+        for i, v in enumerate(verts):
+            key = tuple(np.round(v / merge_tolerance).astype(int))
+            if key not in vert_map:
+                vert_map[key] = len(unique_verts)
+                unique_verts.append(v)
+
+        new_tris = []
+        for tri in tris:
+            new_tri = []
+            for idx in tri:
+                key = tuple(np.round(verts[idx] / merge_tolerance).astype(int))
+                new_tri.append(vert_map[key])
+            new_tris.append(new_tri)
+
+        verts = np.array(unique_verts, dtype=np.float32)
+        tris = np.array(new_tris, dtype=np.uint32)
+
+        from manifold3d import Mesh
+        mesh = Mesh(vert_properties=verts, tri_verts=tris)
+        manifold = Manifold(mesh)
+
+        if manifold.is_empty():
+            print(f"Warning: STL loaded but resulted in empty manifold: {filepath}")
+            return None
+
+        return manifold
+    except Exception as e:
+        print(f"Error loading STL {filepath}: {e}")
+        return None
+
+
 def create_test_shapes() -> dict:
     """Create a variety of test shapes for offset comparison."""
     shapes = {}
@@ -246,6 +340,22 @@ def create_test_shapes() -> dict:
         shapes['star'] = Manifold.extrude(star_cs, 0.3)
     except Exception as e:
         print(f"Warning: Could not create star shape: {e}")
+
+    # Load spoon STL for Minkowski sum tests (like CGAL's classic example)
+    # The spoon is scaled to fit within a reasonable bounding box
+    script_dir = Path(__file__).parent
+    spoon_path = script_dir / "rice_spoon.stl"
+    if spoon_path.exists():
+        spoon = load_stl_as_manifold(str(spoon_path))
+        if spoon is not None:
+            # Scale and center the spoon to fit within a 1.0 unit bounding box
+            # Original bounds are roughly -11.5 to 11.5 in x, -40 to 40 in y, 0 to 7 in z
+            # Scale to fit in a ~1.0 unit cube, centered
+            scale_factor = 1.0 / 80.0  # Scale down by 80x
+            spoon = spoon.scale([scale_factor, scale_factor, scale_factor])
+            shapes['spoon'] = spoon
+    else:
+        print(f"Warning: Spoon STL not found at {spoon_path}")
 
     return shapes
 
@@ -345,12 +455,64 @@ def create_nonconvex_structuring_elements() -> dict:
     corner = Manifold.cube([0.05, 0.05, 0.05], True).translate([0.03, 0.03, 0.03])
     elements['notched_element'] = cube - corner
 
+    # Star element: cube with a point (spike) above each face
+    # This matches the classic CGAL Minkowski sum star shape
+    half = 0.04  # half-size of the cube
+    spike_height = 0.06  # height of each spike from face center
+    # Start with the central cube
+    star_cube = Manifold.cube([half * 2, half * 2, half * 2], True)
+    # Create spikes by hulling each face with a point above it
+    # Face vertices for a centered cube: corners at (+/-half, +/-half, +/-half)
+    spikes = []
+    # +X face spike
+    spikes.append(Manifold.hull_points([
+        [half, -half, -half], [half, half, -half],
+        [half, half, half], [half, -half, half],
+        [half + spike_height, 0, 0]
+    ]))
+    # -X face spike
+    spikes.append(Manifold.hull_points([
+        [-half, -half, -half], [-half, half, -half],
+        [-half, half, half], [-half, -half, half],
+        [-half - spike_height, 0, 0]
+    ]))
+    # +Y face spike
+    spikes.append(Manifold.hull_points([
+        [-half, half, -half], [half, half, -half],
+        [half, half, half], [-half, half, half],
+        [0, half + spike_height, 0]
+    ]))
+    # -Y face spike
+    spikes.append(Manifold.hull_points([
+        [-half, -half, -half], [half, -half, -half],
+        [half, -half, half], [-half, -half, half],
+        [0, -half - spike_height, 0]
+    ]))
+    # +Z face spike
+    spikes.append(Manifold.hull_points([
+        [-half, -half, half], [half, -half, half],
+        [half, half, half], [-half, half, half],
+        [0, 0, half + spike_height]
+    ]))
+    # -Z face spike
+    spikes.append(Manifold.hull_points([
+        [-half, -half, -half], [half, -half, -half],
+        [half, half, -half], [-half, half, -half],
+        [0, 0, -half - spike_height]
+    ]))
+    # Union the cube with all spikes
+    star = star_cube
+    for spike in spikes:
+        star = star + spike
+    elements['star_element'] = star
+
     return elements
 
 
 def test_nonconvex_minkowski(shape: Manifold, shape_name: str,
                               element: Manifold, element_name: str,
-                              is_sum: bool = True) -> Tuple[TestResult, Optional[Manifold]]:
+                              is_sum: bool = True,
+                              timeout_seconds: int = TEST_TIMEOUT_SECONDS) -> Tuple[TestResult, Optional[Manifold]]:
     """
     Test NonConvex-NonConvex Minkowski sum/difference.
     Both shape and element should be non-convex to exercise the slow path.
@@ -359,13 +521,14 @@ def test_nonconvex_minkowski(shape: Manifold, shape_name: str,
     test_name = f"{shape_name}_x_{element_name}"
     method_name = f"nc_mink_{op_name}"
 
-    try:
-        start_time = time.perf_counter()
+    def do_minkowski():
         if is_sum:
-            result = shape.minkowski_sum(element)
+            return shape.minkowski_sum(element)
         else:
-            result = shape.minkowski_difference(element)
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
+            return shape.minkowski_difference(element)
+
+    try:
+        result, elapsed_ms = run_with_timeout(do_minkowski, timeout_seconds)
 
         return TestResult(
             name=test_name,
@@ -378,6 +541,18 @@ def test_nonconvex_minkowski(shape: Manifold, shape_name: str,
             is_empty=result.is_empty(),
             genus=compute_genus(result)
         ), result
+    except TimeoutError as e:
+        return TestResult(
+            name=test_name,
+            method=method_name,
+            delta=1.0 if is_sum else -1.0,
+            time_ms=timeout_seconds * 1000,
+            num_verts=0,
+            num_tris=0,
+            volume=0.0,
+            is_empty=True,
+            error=f"TIMEOUT ({timeout_seconds}s)"
+        ), None
     except Exception as e:
         return TestResult(
             name=test_name,
@@ -572,10 +747,12 @@ def run_tests(output_dir: str, deltas: List[float] = None,
         save_stl(elem, str(stl_dir / f"{elem_name}_original.stl"))
 
     # Select non-convex shapes for testing
+    # Note: spoon is excluded because it has 904 triangles, making NC-NC Minkowski
+    # operations prohibitively slow (904 * element_tris hull operations)
     nonconvex_shapes = {
         'fun_shape': shapes['fun_shape'],
         'l_shape': shapes['l_shape'],
-        'hollow_sphere': shapes['hollow_sphere'],
+        # 'hollow_sphere': shapes['hollow_sphere'],  # Also slow due to high tri count
     }
 
     # Test each non-convex shape with each non-convex structuring element

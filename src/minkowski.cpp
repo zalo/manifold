@@ -90,10 +90,16 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
       composedHulls.push_back(Manifold::BatchBoolean(newHulls, OpType::Add));
     }
     // Non-Convex - Non-Convex Minkowski: Very Slow
+    // Process batches sequentially to conserve memory, merging each batch's
+    // result into a running total instead of accumulating all batch results.
   } else if (!aConvex && !bConvex) {
     const size_t numTriA = aImpl->NumTri();
     const size_t numTriB = bImpl->NumTri();
     const size_t totalPairs = numTriA * numTriB;
+
+    // Running total that accumulates batch results sequentially
+    Manifold runningTotal;
+    bool hasResult = false;
 
     // Process face pairs in batches with parallelization
     for (size_t offset = 0; offset < totalPairs; offset += BATCH_SIZE) {
@@ -136,7 +142,7 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
             validHull[iter] = true;
           });
 
-      // Collect valid (non-coplanar) hulls
+      // Collect valid (non-coplanar) hulls and merge with running total
       std::vector<Manifold> batchHulls;
       for (size_t i = 0; i < numIter; ++i) {
         if (validHull[i]) {
@@ -144,9 +150,20 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
         }
       }
       if (!batchHulls.empty()) {
-        composedHulls.push_back(
-            Manifold::BatchBoolean(batchHulls, OpType::Add));
+        Manifold batchResult = Manifold::BatchBoolean(batchHulls, OpType::Add);
+        if (hasResult) {
+          // Merge batch result with running total immediately to save memory
+          runningTotal = runningTotal + batchResult;
+        } else {
+          runningTotal = std::move(batchResult);
+          hasResult = true;
+        }
       }
+    }
+
+    // Add the accumulated NC-NC result to composedHulls for final merge
+    if (hasResult) {
+      composedHulls.push_back(std::move(runningTotal));
     }
   }
   return Manifold::BatchBoolean(composedHulls, inset

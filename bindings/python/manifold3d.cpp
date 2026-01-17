@@ -1017,20 +1017,20 @@ NB_MODULE(manifold3d, m) {
 
   m.def(
       "constrained_delaunay_tetrahedralization",
-      [](Manifold &manifold, float minQuality, int maxSteinerIterations) {
+      [](Manifold &manifold, float minQuality, int maxIterations) {
         return ConstrainedDelaunayTetrahedralization(manifold, minQuality,
-                                                     maxSteinerIterations);
+                                                     maxIterations);
       },
       nb::arg("manifold"), nb::arg("min_quality") = 0.0f,
-      nb::arg("max_steiner_iterations") = 100,
+      nb::arg("max_iterations") = 10,
       "Performs constrained Delaunay tetrahedralization on a manifold mesh.\n"
-      "This ensures all surface triangles of the input manifold are present "
-      "as faces of tetrahedra in the output. Steiner points are added at "
-      "triangle centroids when needed to recover missing surface triangles.\n\n"
+      "Uses an intersection-based approach to trim tetrahedra to the manifold "
+      "boundary. Tetrahedra outside the manifold are discarded, and partial "
+      "intersections are accumulated and re-tetrahedralized.\n\n"
       ":param manifold: The input manifold mesh to tetrahedralize.\n"
       ":param min_quality: Minimum tetrahedron quality threshold (0.0 to 1.0).\n"
-      ":param max_steiner_iterations: Maximum number of Steiner point insertion "
-      "iterations. Default is 100.\n"
-      ":return: TetMesh containing vertices (including any Steiner points) and "
-      "tetrahedra indices.");
+      ":param max_iterations: Maximum number of refinement iterations. "
+      "Default is 10.\n"
+      ":return: TetMesh containing vertices and tetrahedra indices for the "
+      "interior tetrahedralization of the manifold.");
 }

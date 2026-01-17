@@ -62,20 +62,23 @@ class Manifold;
  * @ingroup Core
  *
  * Performs constrained Delaunay tetrahedralization on a manifold mesh.
- * This ensures all surface triangles of the input manifold are present
- * as faces of tetrahedra in the output. Steiner points are added at
- * triangle centroids when needed to recover missing surface triangles.
+ * Uses an intersection-based approach to trim tetrahedra to the manifold
+ * boundary:
+ * 1. Performs unconstrained Delaunay tetrahedralization of manifold vertices
+ * 2. Intersects each tetrahedron with the original manifold
+ * 3. Discards tetrahedra with empty intersection (fully outside)
+ * 4. Keeps tetrahedra fully inside the manifold
+ * 5. Accumulates partial intersections, unions them, and re-tetrahedralizes
+ * 6. Repeats until convergence
  *
  * @param manifold The input manifold mesh to tetrahedralize
  * @param minQuality Minimum tetrahedron quality threshold (0.0 to 1.0)
- * @param maxSteinerIterations Maximum number of Steiner point insertion
- *                             iterations. Default is 100.
- * @return TetMesh containing vertices (including any Steiner points) and
- *         tetrahedra indices. Original manifold vertices are preserved at
- *         indices 0 to NumVert()-1.
+ * @param maxIterations Maximum number of refinement iterations. Default is 10.
+ * @return TetMesh containing vertices and tetrahedra indices for the interior
+ *         tetrahedralization of the manifold.
  */
 TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
                                               float minQuality = 0.0f,
-                                              int maxSteinerIterations = 100);
+                                              int maxIterations = 10);
 
 }  // namespace manifold

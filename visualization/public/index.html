@@ -222,9 +222,137 @@
         .hidden {
             display: none !important;
         }
+
+        /* Mobile menu button */
+        #menu-toggle {
+            display: none;
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            z-index: 1000;
+            background: #e94560;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 1.2em;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        #menu-toggle:hover {
+            background: #ff6b6b;
+        }
+
+        /* Mobile responsive styles */
+        @media (max-width: 768px) {
+            #menu-toggle {
+                display: block;
+            }
+
+            #sidebar {
+                position: fixed;
+                left: -320px;
+                top: 0;
+                height: 100vh;
+                z-index: 999;
+                transition: left 0.3s ease;
+                width: 280px;
+                padding-top: 70px;
+            }
+
+            #sidebar.open {
+                left: 0;
+            }
+
+            #sidebar-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0,0,0,0.5);
+                z-index: 998;
+            }
+
+            #sidebar-overlay.open {
+                display: block;
+            }
+
+            #viewer {
+                width: 100%;
+            }
+
+            #info-panel {
+                top: 70px;
+                right: 10px;
+                left: 10px;
+                min-width: auto;
+                font-size: 0.9em;
+                padding: 12px;
+            }
+
+            #info-panel h2 {
+                font-size: 1em;
+            }
+
+            #controls {
+                bottom: 10px;
+                left: 10px;
+                right: 10px;
+                padding: 12px;
+            }
+
+            #controls label {
+                font-size: 0.8em;
+                margin-bottom: 6px;
+            }
+
+            #controls input[type="range"] {
+                width: 100px;
+            }
+
+            .test-case {
+                padding: 10px;
+            }
+
+            .test-case h3 {
+                font-size: 0.95em;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #info-panel {
+                top: 65px;
+                right: 5px;
+                left: 5px;
+                padding: 10px;
+            }
+
+            #info-panel .stat-row {
+                font-size: 0.8em;
+            }
+
+            #controls {
+                bottom: 5px;
+                left: 5px;
+                right: 5px;
+            }
+
+            h1 {
+                font-size: 1.2em;
+            }
+
+            .subtitle {
+                font-size: 0.75em;
+            }
+        }
     </style>
 </head>
 <body>
+    <button id="menu-toggle">☰ Tests</button>
+    <div id="sidebar-overlay"></div>
     <div id="container">
         <div id="sidebar">
             <h1>Tetrahedralization Viewer</h1>
@@ -599,9 +727,37 @@
             });
         }
 
+        // Mobile menu functionality
+        function setupMobileMenu() {
+            const menuToggle = document.getElementById('menu-toggle');
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+
+            function toggleMenu() {
+                sidebar.classList.toggle('open');
+                overlay.classList.toggle('open');
+            }
+
+            function closeMenu() {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+            }
+
+            menuToggle.addEventListener('click', toggleMenu);
+            overlay.addEventListener('click', closeMenu);
+
+            // Close menu when selecting a test on mobile
+            document.getElementById('test-list').addEventListener('click', (e) => {
+                if (e.target.closest('.test-case') && window.innerWidth <= 768) {
+                    closeMenu();
+                }
+            });
+        }
+
         // Load data and initialize
         async function main() {
             init();
+            setupMobileMenu();
 
             try {
                 const response = await fetch('test_data.json');

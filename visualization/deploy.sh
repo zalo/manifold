@@ -43,8 +43,8 @@ fi
 # Create project if it doesn't exist
 wrangler pages project create "$PROJECT_NAME" --production-branch main 2>/dev/null || true
 
-# Deploy using wrangler pages
-wrangler pages deploy public --project-name="$PROJECT_NAME" --commit-dirty=true
+# Deploy using wrangler pages to production (main branch)
+wrangler pages deploy public --project-name="$PROJECT_NAME" --branch=main --commit-dirty=true
 
 echo ""
 echo "========================================"

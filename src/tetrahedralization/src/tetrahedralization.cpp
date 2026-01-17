@@ -424,9 +424,66 @@ TetMesh DelaunayTetrahedralization(const std::vector<glm::vec3>& points,
   return result;
 }
 
+// Create a tetrahedron manifold from 4 vertices
+Manifold CreateTetrahedronManifold(const glm::vec3& p0, const glm::vec3& p1,
+                                   const glm::vec3& p2, const glm::vec3& p3) {
+  // Build mesh for a single tetrahedron with 4 triangular faces
+  Mesh tetMesh;
+  tetMesh.vertPos = {p0, p1, p2, p3};
+
+  // Compute orientation - ensure outward-facing normals
+  glm::vec3 center = (p0 + p1 + p2 + p3) * 0.25f;
+
+  // Helper to check if triangle faces outward from center
+  auto facesOutward = [&center](const glm::vec3& a, const glm::vec3& b,
+                                const glm::vec3& c) {
+    glm::vec3 faceCenter = (a + b + c) / 3.0f;
+    glm::vec3 normal = glm::cross(b - a, c - a);
+    glm::vec3 toFace = faceCenter - center;
+    return glm::dot(normal, toFace) > 0;
+  };
+
+  // Face 0: vertices 0, 2, 1 (opposite to vertex 3)
+  if (facesOutward(p0, p2, p1)) {
+    tetMesh.triVerts.push_back({0, 2, 1});
+  } else {
+    tetMesh.triVerts.push_back({0, 1, 2});
+  }
+
+  // Face 1: vertices 0, 1, 3 (opposite to vertex 2)
+  if (facesOutward(p0, p1, p3)) {
+    tetMesh.triVerts.push_back({0, 1, 3});
+  } else {
+    tetMesh.triVerts.push_back({0, 3, 1});
+  }
+
+  // Face 2: vertices 1, 2, 3 (opposite to vertex 0)
+  if (facesOutward(p1, p2, p3)) {
+    tetMesh.triVerts.push_back({1, 2, 3});
+  } else {
+    tetMesh.triVerts.push_back({1, 3, 2});
+  }
+
+  // Face 3: vertices 0, 3, 2 (opposite to vertex 1)
+  if (facesOutward(p0, p3, p2)) {
+    tetMesh.triVerts.push_back({0, 3, 2});
+  } else {
+    tetMesh.triVerts.push_back({0, 2, 3});
+  }
+
+  return Manifold(tetMesh);
+}
+
+// Compute signed volume of tetrahedron
+float TetrahedronVolume(const glm::vec3& p0, const glm::vec3& p1,
+                        const glm::vec3& p2, const glm::vec3& p3) {
+  glm::vec3 d0 = p1 - p0, d1 = p2 - p0, d2 = p3 - p0;
+  return std::abs(glm::dot(d0, glm::cross(d1, d2)) / 6.0f);
+}
+
 TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
                                               float minQuality,
-                                              int maxSteinerIterations) {
+                                              int /*maxIterations*/) {
   TetMesh result;
 
   if (manifold.IsEmpty()) {
@@ -439,98 +496,54 @@ TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
     return result;
   }
 
-  // Build set of surface triangles that must be present in tetrahedralization
-  std::unordered_set<std::array<uint32_t, 3>, TriangleHash, TriangleEqual>
-      requiredTriangles;
-  for (const auto& tri : mesh.triVerts) {
-    requiredTriangles.insert(
-        {static_cast<uint32_t>(tri[0]), static_cast<uint32_t>(tri[1]),
-         static_cast<uint32_t>(tri[2])});
+  const float volumeTolerance = 1e-6f;
+
+  // Reset random seed for reproducibility
+  srand(12345);
+
+  // Perform unconstrained Delaunay tetrahedralization of surface vertices
+  TetMesh tetMesh = DelaunayTetrahedralization(mesh.vertPos, minQuality);
+
+  if (tetMesh.tetVerts.empty()) {
+    return result;
   }
 
-  const size_t originalTriCount = requiredTriangles.size();
+  // Filter tetrahedra to keep only those inside the manifold
+  std::vector<std::array<uint32_t, 4>> insideTets;
 
-  // Start with manifold vertices
-  std::vector<glm::vec3> currentVerts = mesh.vertPos;
+  for (const auto& tet : tetMesh.tetVerts) {
+    const glm::vec3& p0 = tetMesh.vertPos[tet[0]];
+    const glm::vec3& p1 = tetMesh.vertPos[tet[1]];
+    const glm::vec3& p2 = tetMesh.vertPos[tet[2]];
+    const glm::vec3& p3 = tetMesh.vertPos[tet[3]];
 
-  size_t lastMissingCount = originalTriCount;
-
-  // Iteratively add Steiner points until all surface triangles are recovered
-  for (int iter = 0; iter < maxSteinerIterations; iter++) {
-    // Perform unconstrained Delaunay tetrahedralization
-    TetMesh tetMesh = DelaunayTetrahedralization(currentVerts, minQuality);
-
-    if (tetMesh.tetVerts.empty()) {
-      // Tetrahedralization failed, return what we have
-      return tetMesh;
+    float tetVolume = TetrahedronVolume(p0, p1, p2, p3);
+    if (tetVolume < volumeTolerance) {
+      continue;
     }
 
-    // Build set of all triangular faces in current tetrahedralization
-    std::unordered_set<std::array<uint32_t, 3>, TriangleHash, TriangleEqual>
-        tetFaces;
-    for (const auto& tet : tetMesh.tetVerts) {
-      // Each tetrahedron has 4 triangular faces
-      tetFaces.insert({tet[0], tet[1], tet[2]});
-      tetFaces.insert({tet[0], tet[1], tet[3]});
-      tetFaces.insert({tet[0], tet[2], tet[3]});
-      tetFaces.insert({tet[1], tet[2], tet[3]});
+    // Create manifold for this tetrahedron
+    Manifold tetManifold = CreateTetrahedronManifold(p0, p1, p2, p3);
+    if (tetManifold.IsEmpty() || tetManifold.Status() != Manifold::Error::NoError) {
+      continue;
     }
 
-    // Find missing surface triangles
-    std::vector<std::array<uint32_t, 3>> missingTriangles;
-    for (const auto& tri : requiredTriangles) {
-      if (tetFaces.find(tri) == tetFaces.end()) {
-        missingTriangles.push_back(tri);
-      }
+    // Intersect with original manifold to check if inside
+    Manifold intersection = tetManifold ^ manifold;
+    if (intersection.IsEmpty()) {
+      continue;  // Tetrahedron is outside
     }
 
-    if (missingTriangles.empty()) {
-      // All surface triangles are present, we're done
-      result = std::move(tetMesh);
-      return result;
-    }
+    float intersectionVolume = intersection.GetProperties().volume;
 
-    // Check if we're making progress - if not, stop
-    if (missingTriangles.size() >= lastMissingCount &&
-        missingTriangles.size() > originalTriCount) {
-      // Not making progress, return current result
-      result = std::move(tetMesh);
-      return result;
-    }
-    lastMissingCount = missingTriangles.size();
-
-    // Limit the number of Steiner points we add per iteration to avoid
-    // exponential growth
-    const size_t maxNewPoints =
-        std::min(missingTriangles.size(), static_cast<size_t>(50));
-
-    // Add Steiner points at centroids of missing triangles
-    for (size_t i = 0; i < maxNewPoints; i++) {
-      const auto& tri = missingTriangles[i];
-      glm::vec3 centroid = (currentVerts[tri[0]] + currentVerts[tri[1]] +
-                            currentVerts[tri[2]]) /
-                           3.0f;
-      uint32_t newVertIdx = static_cast<uint32_t>(currentVerts.size());
-      currentVerts.push_back(centroid);
-
-      // Update required triangles: split the missing triangle into 3
-      requiredTriangles.erase(tri);
-      requiredTriangles.insert({tri[0], tri[1], newVertIdx});
-      requiredTriangles.insert({tri[1], tri[2], newVertIdx});
-      requiredTriangles.insert({tri[2], tri[0], newVertIdx});
-    }
-
-    // Store result on last iteration
-    if (iter == maxSteinerIterations - 1) {
-      result = std::move(tetMesh);
+    // Keep tetrahedra that are mostly inside (>50% overlap)
+    if (intersectionVolume > 0.5f * tetVolume) {
+      insideTets.push_back(tet);
     }
   }
 
-  // If we haven't stored a result yet, do one final tetrahedralization
-  if (result.tetVerts.empty()) {
-    result = DelaunayTetrahedralization(currentVerts, minQuality);
-  }
-
+  result.vertPos = tetMesh.vertPos;
+  result.tetVerts = insideTets;
   return result;
 }
 

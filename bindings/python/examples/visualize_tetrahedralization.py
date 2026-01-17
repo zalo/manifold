@@ -346,7 +346,7 @@ def demo_visualization():
 
     # Tetrahedralize
     print("\n2. Performing constrained tetrahedralization...")
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(shape, 0.0, 50)
+    tet_mesh = m3d.constrained_delaunay_tetrahedralization(shape, 0.0, 10)
     print(f"   Result: {tet_mesh.num_vert} vertices, {tet_mesh.num_tet} tetrahedra")
 
     # Show quality histogram

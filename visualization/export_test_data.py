@@ -12,23 +12,7 @@ from time import time
 
 
 def load_manifold3d():
-    """Load manifold3d, preferring local build over installed version."""
-    script_dir = pathlib.Path(__file__).parent
-    potential_paths = [
-        script_dir / ".." / "build-tet" / "bindings" / "python" / "manifold3d.cpython-39-x86_64-linux-gnu.so",
-        script_dir / ".." / "build" / "bindings" / "python" / "manifold3d.cpython-39-x86_64-linux-gnu.so",
-        script_dir / ".." / "build-debug" / "bindings" / "python" / "manifold3d.cpython-39-x86_64-linux-gnu.so",
-        script_dir / ".." / "build-release" / "bindings" / "python" / "manifold3d.cpython-39-x86_64-linux-gnu.so",
-    ]
-
-    for path in potential_paths:
-        if path.exists():
-            spec = importlib.util.spec_from_file_location('manifold3d', str(path.resolve()))
-            if spec:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                return module
-
+    """Load manifold3d from pip-installed version."""
     import manifold3d
     return manifold3d
 
@@ -100,19 +84,7 @@ def generate_test_cases(m3d):
     """Generate all test cases and return as list of dicts."""
     test_cases = []
 
-    # 1. Random points (unconstrained)
-    print("Generating: Random Points...")
-    np.random.seed(42)
-    points = [(float(x), float(y), float(z)) for x, y, z in np.random.randn(50, 3)]
-    t0 = time()
-    tet_mesh = m3d.delaunay_tetrahedralization(points)
-    elapsed = time() - t0
-    test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "Random Points", f"50 random 3D points, unconstrained Delaunay ({elapsed*1000:.1f}ms)"),
-        "type": "unconstrained"
-    })
-
-    # 2. Cube
+    # 1. Cube (do constrained first to avoid state issues)
     print("Generating: Cube...")
     cube = m3d.Manifold.cube((2, 2, 2), center=True)
     t0 = time()
@@ -123,7 +95,7 @@ def generate_test_cases(m3d):
         "type": "constrained"
     })
 
-    # 3. Sphere
+    # 2. Sphere
     print("Generating: Sphere...")
     sphere = m3d.Manifold.sphere(1.0, 16)
     t0 = time()
@@ -212,7 +184,19 @@ def generate_test_cases(m3d):
         "type": "constrained"
     })
 
-    # 10. Large random point cloud
+    # 10. Random points (unconstrained) - placed at end to avoid state issues
+    print("Generating: Random Points...")
+    np.random.seed(42)
+    points = [(float(x), float(y), float(z)) for x, y, z in np.random.randn(50, 3)]
+    t0 = time()
+    tet_mesh = m3d.delaunay_tetrahedralization(points)
+    elapsed = time() - t0
+    test_cases.append({
+        **tet_mesh_to_dict(tet_mesh, "Random Points", f"50 random 3D points, unconstrained Delaunay ({elapsed*1000:.1f}ms)"),
+        "type": "unconstrained"
+    })
+
+    # 11. Large random point cloud
     print("Generating: Large Point Cloud...")
     np.random.seed(123)
     points = [(float(x), float(y), float(z)) for x, y, z in np.random.randn(200, 3)]

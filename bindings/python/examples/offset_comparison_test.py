@@ -755,18 +755,13 @@ def run_tests(output_dir: str, deltas: List[float] = None,
         'l_shape': shapes['l_shape'],
         'hollow_sphere': shapes['hollow_sphere'],
     }
-    # Add spoon if available - only test with star_element to keep runtime reasonable
+    # Add spoon if available
     if 'spoon' in shapes:
         nonconvex_shapes['spoon'] = shapes['spoon']
 
     # Test each non-convex shape with each non-convex structuring element
-    # Note: spoon is only tested with star_element (fastest) to keep runtime reasonable
     for shape_name, shape in nonconvex_shapes.items():
-        # For spoon, only test with star_element (24 tris vs 52 for l_element)
-        if shape_name == 'spoon':
-            test_elements = {'star_element': nc_elements['star_element']}
-        else:
-            test_elements = nc_elements
+        test_elements = nc_elements
         for elem_name, element in test_elements.items():
             # Test Minkowski sum (dilation)
             print(f"  Starting {shape_name} + {elem_name} (sum)...", end=" ", flush=True)

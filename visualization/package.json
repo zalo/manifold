@@ -1,0 +1,19 @@
+{
+  "name": "manifold-tet-viewer",
+  "version": "1.0.0",
+  "description": "Three.js visualization for Manifold tetrahedralization test results",
+  "scripts": {
+    "export": "python3 export_test_data.py",
+    "deploy": "./deploy.sh",
+    "dev": "python3 -m http.server 8080 -d public"
+  },
+  "keywords": [
+    "manifold",
+    "tetrahedralization",
+    "delaunay",
+    "visualization",
+    "three.js"
+  ],
+  "author": "Manifold Authors",
+  "license": "Apache-2.0"
+}

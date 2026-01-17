@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manifold Tetrahedralization Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            overflow: hidden;
+        }
+
+        #container {
+            display: flex;
+            height: 100vh;
+        }
+
+        #sidebar {
+            width: 320px;
+            background: #16213e;
+            padding: 20px;
+            overflow-y: auto;
+            border-right: 1px solid #0f3460;
+        }
+
+        h1 {
+            font-size: 1.4em;
+            margin-bottom: 5px;
+            color: #e94560;
+        }
+
+        .subtitle {
+            font-size: 0.85em;
+            color: #888;
+            margin-bottom: 20px;
+        }
+
+        .test-case {
+            background: #0f3460;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .test-case:hover {
+            background: #1a4a7a;
+        }
+
+        .test-case.active {
+            border-color: #e94560;
+            background: #1a4a7a;
+        }
+
+        .test-case h3 {
+            font-size: 1em;
+            margin-bottom: 4px;
+            color: #fff;
+        }
+
+        .test-case .type {
+            font-size: 0.75em;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-bottom: 6px;
+        }
+
+        .type.constrained {
+            background: #2d6a4f;
+            color: #b7e4c7;
+        }
+
+        .type.unconstrained {
+            background: #5c4d7d;
+            color: #d8b4fe;
+        }
+
+        .test-case .stats {
+            font-size: 0.8em;
+            color: #aaa;
+        }
+
+        .test-case .quality-bar {
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .test-case .quality-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #e94560, #ffc107, #4caf50);
+            transition: width 0.3s;
+        }
+
+        #viewer {
+            flex: 1;
+            position: relative;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+
+        #info-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(22, 33, 62, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 200px;
+        }
+
+        #info-panel h2 {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            color: #e94560;
+        }
+
+        #info-panel .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+        }
+
+        #info-panel .stat-label {
+            color: #888;
+        }
+
+        #info-panel .stat-value {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(22, 33, 62, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        #controls label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.85em;
+        }
+
+        #controls input[type="range"] {
+            width: 150px;
+            margin-left: 10px;
+        }
+
+        #controls input[type="checkbox"] {
+            margin-right: 8px;
+        }
+
+        .color-legend {
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #333;
+        }
+
+        .color-legend .title {
+            font-size: 0.8em;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .gradient-bar {
+            height: 12px;
+            background: linear-gradient(90deg, #e94560, #ffc107, #4caf50);
+            border-radius: 3px;
+        }
+
+        .gradient-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.7em;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        #loading .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: #e94560;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="sidebar">
+            <h1>Tetrahedralization Viewer</h1>
+            <p class="subtitle">Manifold Library Test Results</p>
+            <div id="test-list"></div>
+        </div>
+        <div id="viewer">
+            <div id="canvas-container"></div>
+
+            <div id="loading">
+                <div class="spinner"></div>
+                <div>Loading test data...</div>
+            </div>
+
+            <div id="info-panel" class="hidden">
+                <h2 id="current-name">-</h2>
+                <p id="current-desc" style="font-size: 0.8em; color: #888; margin-bottom: 10px;"></p>
+                <div class="stat-row">
+                    <span class="stat-label">Vertices:</span>
+                    <span class="stat-value" id="stat-verts">-</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Tetrahedra:</span>
+                    <span class="stat-value" id="stat-tets">-</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Min Quality:</span>
+                    <span class="stat-value" id="stat-min">-</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Max Quality:</span>
+                    <span class="stat-value" id="stat-max">-</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Mean Quality:</span>
+                    <span class="stat-value" id="stat-mean">-</span>
+                </div>
+                <div class="color-legend">
+                    <div class="title">Quality Color Scale</div>
+                    <div class="gradient-bar"></div>
+                    <div class="gradient-labels">
+                        <span>Poor (0)</span>
+                        <span>Good (1)</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="controls" class="hidden">
+                <label>
+                    <input type="checkbox" id="show-surface" checked>
+                    Show Surface Mesh
+                </label>
+                <label>
+                    <input type="checkbox" id="show-tets" checked>
+                    Show Tetrahedra
+                </label>
+                <label>
+                    Tet Scale:
+                    <input type="range" id="tet-scale" min="0.3" max="1.0" step="0.05" value="0.75">
+                </label>
+                <label>
+                    <input type="checkbox" id="wireframe">
+                    Wireframe Mode
+                </label>
+                <label>
+                    <input type="checkbox" id="auto-rotate" checked>
+                    Auto Rotate
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls;
+        let tetMesh, surfaceMesh;
+        let testData = null;
+        let currentTestIndex = 0;
+
+        // Initialize Three.js
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(
+                60,
+                container.clientWidth / container.clientHeight,
+                0.1,
+                1000
+            );
+            camera.position.set(5, 5, 5);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 1.0;
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 10, 7);
+            scene.add(directionalLight);
+
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight2.position.set(-5, -5, -5);
+            scene.add(directionalLight2);
+
+            // Grid helper
+            const gridHelper = new THREE.GridHelper(10, 20, 0x333333, 0x222222);
+            scene.add(gridHelper);
+
+            // Handle resize
+            window.addEventListener('resize', onWindowResize);
+
+            // Setup controls
+            setupControls();
+
+            // Start animation
+            animate();
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function setupControls() {
+            document.getElementById('show-surface').addEventListener('change', (e) => {
+                if (surfaceMesh) surfaceMesh.visible = e.target.checked;
+            });
+
+            document.getElementById('show-tets').addEventListener('change', (e) => {
+                if (tetMesh) tetMesh.visible = e.target.checked;
+            });
+
+            document.getElementById('tet-scale').addEventListener('input', (e) => {
+                if (testData) {
+                    loadTestCase(currentTestIndex);
+                }
+            });
+
+            document.getElementById('wireframe').addEventListener('change', (e) => {
+                if (tetMesh) {
+                    tetMesh.material.wireframe = e.target.checked;
+                }
+            });
+
+            document.getElementById('auto-rotate').addEventListener('change', (e) => {
+                controls.autoRotate = e.target.checked;
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function qualityToColor(quality) {
+            // Red (0) -> Yellow (0.5) -> Green (1)
+            const r = quality < 0.5 ? 1.0 : 1.0 - (quality - 0.5) * 2;
+            const g = quality < 0.5 ? quality * 2 : 1.0;
+            const b = 0.2;
+            return new THREE.Color(r, g, b);
+        }
+
+        function createTetrahedraMesh(vertices, tetrahedra, qualities, scale) {
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const colors = [];
+
+            for (let i = 0; i < tetrahedra.length; i++) {
+                const tet = tetrahedra[i];
+                const quality = qualities[i];
+
+                // Get vertices
+                const v0 = new THREE.Vector3(...vertices[tet[0]]);
+                const v1 = new THREE.Vector3(...vertices[tet[1]]);
+                const v2 = new THREE.Vector3(...vertices[tet[2]]);
+                const v3 = new THREE.Vector3(...vertices[tet[3]]);
+
+                // Calculate centroid
+                const centroid = new THREE.Vector3()
+                    .add(v0).add(v1).add(v2).add(v3)
+                    .multiplyScalar(0.25);
+
+                // Scale around centroid
+                const v0s = v0.clone().sub(centroid).multiplyScalar(scale).add(centroid);
+                const v1s = v1.clone().sub(centroid).multiplyScalar(scale).add(centroid);
+                const v2s = v2.clone().sub(centroid).multiplyScalar(scale).add(centroid);
+                const v3s = v3.clone().sub(centroid).multiplyScalar(scale).add(centroid);
+
+                // Check for degenerate
+                const edge1 = v1s.clone().sub(v0s);
+                const edge2 = v2s.clone().sub(v0s);
+                const edge3 = v3s.clone().sub(v0s);
+                const volume = Math.abs(edge1.dot(edge2.clone().cross(edge3))) / 6.0;
+                if (volume < 1e-8) continue;
+
+                // Color based on quality
+                const color = qualityToColor(quality);
+
+                // Create 4 triangular faces
+                // Face 0: v0, v2, v1
+                positions.push(v0s.x, v0s.y, v0s.z);
+                positions.push(v2s.x, v2s.y, v2s.z);
+                positions.push(v1s.x, v1s.y, v1s.z);
+
+                // Face 1: v0, v1, v3
+                positions.push(v0s.x, v0s.y, v0s.z);
+                positions.push(v1s.x, v1s.y, v1s.z);
+                positions.push(v3s.x, v3s.y, v3s.z);
+
+                // Face 2: v1, v2, v3
+                positions.push(v1s.x, v1s.y, v1s.z);
+                positions.push(v2s.x, v2s.y, v2s.z);
+                positions.push(v3s.x, v3s.y, v3s.z);
+
+                // Face 3: v0, v3, v2
+                positions.push(v0s.x, v0s.y, v0s.z);
+                positions.push(v3s.x, v3s.y, v3s.z);
+                positions.push(v2s.x, v2s.y, v2s.z);
+
+                // Add colors for all 12 vertices
+                for (let j = 0; j < 12; j++) {
+                    colors.push(color.r, color.g, color.b);
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshPhongMaterial({
+                vertexColors: true,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.85,
+                wireframe: document.getElementById('wireframe').checked
+            });
+
+            return new THREE.Mesh(geometry, material);
+        }
+
+        function createSurfaceMesh(vertices, triangles) {
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+
+            for (const tri of triangles) {
+                for (const idx of tri) {
+                    positions.push(...vertices[idx]);
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x4a90d9,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.3,
+                depthWrite: false
+            });
+
+            return new THREE.Mesh(geometry, material);
+        }
+
+        function loadTestCase(index) {
+            const tc = testData.testCases[index];
+            currentTestIndex = index;
+
+            // Remove existing meshes
+            if (tetMesh) {
+                scene.remove(tetMesh);
+                tetMesh.geometry.dispose();
+                tetMesh.material.dispose();
+            }
+            if (surfaceMesh) {
+                scene.remove(surfaceMesh);
+                surfaceMesh.geometry.dispose();
+                surfaceMesh.material.dispose();
+            }
+
+            const scale = parseFloat(document.getElementById('tet-scale').value);
+
+            // Create tetrahedra mesh
+            tetMesh = createTetrahedraMesh(tc.vertices, tc.tetrahedra, tc.qualities, scale);
+            tetMesh.visible = document.getElementById('show-tets').checked;
+            scene.add(tetMesh);
+
+            // Create surface mesh if available
+            if (tc.surface) {
+                surfaceMesh = createSurfaceMesh(tc.surface.vertices, tc.surface.triangles);
+                surfaceMesh.visible = document.getElementById('show-surface').checked;
+                scene.add(surfaceMesh);
+            }
+
+            // Center camera on mesh
+            const box = new THREE.Box3().setFromObject(tetMesh);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+
+            controls.target.copy(center);
+            camera.position.copy(center);
+            camera.position.x += maxDim * 1.5;
+            camera.position.y += maxDim * 1.5;
+            camera.position.z += maxDim * 1.5;
+
+            // Update UI
+            document.getElementById('current-name').textContent = tc.name;
+            document.getElementById('current-desc').textContent = tc.description;
+            document.getElementById('stat-verts').textContent = tc.stats.numVertices;
+            document.getElementById('stat-tets').textContent = tc.stats.numTetrahedra;
+            document.getElementById('stat-min').textContent = tc.stats.minQuality.toFixed(3);
+            document.getElementById('stat-max').textContent = tc.stats.maxQuality.toFixed(3);
+            document.getElementById('stat-mean').textContent = tc.stats.meanQuality.toFixed(3);
+
+            // Update sidebar selection
+            document.querySelectorAll('.test-case').forEach((el, i) => {
+                el.classList.toggle('active', i === index);
+            });
+        }
+
+        function populateTestList() {
+            const list = document.getElementById('test-list');
+            list.innerHTML = '';
+
+            testData.testCases.forEach((tc, index) => {
+                const div = document.createElement('div');
+                div.className = 'test-case' + (index === 0 ? ' active' : '');
+                div.innerHTML = `
+                    <span class="type ${tc.type}">${tc.type}</span>
+                    <h3>${tc.name}</h3>
+                    <div class="stats">
+                        ${tc.stats.numTetrahedra} tetrahedra, ${tc.stats.numVertices} vertices
+                    </div>
+                    <div class="quality-bar">
+                        <div class="quality-fill" style="width: ${tc.stats.meanQuality * 100}%"></div>
+                    </div>
+                `;
+                div.addEventListener('click', () => loadTestCase(index));
+                list.appendChild(div);
+            });
+        }
+
+        // Load data and initialize
+        async function main() {
+            init();
+
+            try {
+                const response = await fetch('test_data.json');
+                testData = await response.json();
+
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('info-panel').classList.remove('hidden');
+                document.getElementById('controls').classList.remove('hidden');
+
+                populateTestList();
+                loadTestCase(0);
+            } catch (error) {
+                document.getElementById('loading').innerHTML = `
+                    <div style="color: #e94560;">Error loading test data</div>
+                    <div style="font-size: 0.8em; margin-top: 10px;">${error.message}</div>
+                    <div style="font-size: 0.8em; margin-top: 10px;">Run: python export_test_data.py</div>
+                `;
+            }
+        }
+
+        main();
+    </script>
+</body>
+</html>

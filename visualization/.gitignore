@@ -1,0 +1,8 @@
+# Generated test data (regenerated on deploy)
+public/test_data.json
+
+# Node modules (if any)
+node_modules/
+
+# Wrangler
+.wrangler/

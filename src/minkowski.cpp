@@ -123,8 +123,8 @@ Manifold Manifold::Impl::Minkowski(const Impl& other, bool inset) const {
     const size_t numTriB = bImpl->NumTri();
 
     // Reduce accumulated results after this many A faces to limit memory
-    // More aggressive batching (lower threshold) to handle large meshes
-    constexpr size_t REDUCE_THRESHOLD = 50;
+    // Higher threshold = faster but more memory usage
+    constexpr size_t REDUCE_THRESHOLD = 200;
 
     // Log initial memory and operation parameters
     long memStart = getMemoryUsageMB();

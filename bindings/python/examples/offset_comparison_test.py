@@ -322,6 +322,76 @@ def test_minkowski_method(shape: Manifold, shape_name: str, delta: float,
         ), None
 
 
+def create_nonconvex_structuring_elements() -> dict:
+    """
+    Create non-convex structuring elements for NonConvex-NonConvex Minkowski tests.
+    These are small non-convex shapes used as the second operand in Minkowski operations.
+    """
+    elements = {}
+
+    # Small L-shape structuring element
+    box1 = Manifold.cube([0.1, 0.03, 0.03], True)
+    box2 = Manifold.cube([0.03, 0.1, 0.03], True)
+    elements['l_element'] = box1 + box2
+
+    # Small cross/plus shape (non-convex)
+    arm_x = Manifold.cube([0.12, 0.03, 0.03], True)
+    arm_y = Manifold.cube([0.03, 0.12, 0.03], True)
+    arm_z = Manifold.cube([0.03, 0.03, 0.12], True)
+    elements['cross_element'] = arm_x + arm_y + arm_z
+
+    # Small notched cube (cube with corner cut out)
+    cube = Manifold.cube([0.08, 0.08, 0.08], True)
+    corner = Manifold.cube([0.05, 0.05, 0.05], True).translate([0.03, 0.03, 0.03])
+    elements['notched_element'] = cube - corner
+
+    return elements
+
+
+def test_nonconvex_minkowski(shape: Manifold, shape_name: str,
+                              element: Manifold, element_name: str,
+                              is_sum: bool = True) -> Tuple[TestResult, Optional[Manifold]]:
+    """
+    Test NonConvex-NonConvex Minkowski sum/difference.
+    Both shape and element should be non-convex to exercise the slow path.
+    """
+    op_name = "sum" if is_sum else "diff"
+    test_name = f"{shape_name}_x_{element_name}"
+    method_name = f"nc_mink_{op_name}"
+
+    try:
+        start_time = time.perf_counter()
+        if is_sum:
+            result = shape.minkowski_sum(element)
+        else:
+            result = shape.minkowski_difference(element)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        return TestResult(
+            name=test_name,
+            method=method_name,
+            delta=1.0 if is_sum else -1.0,  # Use delta to indicate sum vs diff
+            time_ms=elapsed_ms,
+            num_verts=result.num_vert(),
+            num_tris=result.num_tri(),
+            volume=result.volume() if not result.is_empty() else 0.0,
+            is_empty=result.is_empty(),
+            genus=compute_genus(result)
+        ), result
+    except Exception as e:
+        return TestResult(
+            name=test_name,
+            method=method_name,
+            delta=1.0 if is_sum else -1.0,
+            time_ms=0,
+            num_verts=0,
+            num_tris=0,
+            volume=0.0,
+            is_empty=True,
+            error=str(e)
+        ), None
+
+
 def test_morphological_operations(shape: Manifold, shape_name: str, delta: float,
                                   circular_segments: int, method: OffsetMethod,
                                   method_name: str) -> Tuple[List[TestResult], Optional[Manifold]]:
@@ -492,6 +562,58 @@ def run_tests(output_dir: str, deltas: List[float] = None,
                     r.stl_file = stl_filename
 
         all_results.extend(morph_results)
+
+    # Test NonConvex-NonConvex Minkowski operations
+    print("\nTesting NonConvex-NonConvex Minkowski operations...", flush=True)
+    nc_elements = create_nonconvex_structuring_elements()
+
+    # Save structuring elements
+    for elem_name, elem in nc_elements.items():
+        save_stl(elem, str(stl_dir / f"{elem_name}_original.stl"))
+
+    # Select non-convex shapes for testing
+    nonconvex_shapes = {
+        'fun_shape': shapes['fun_shape'],
+        'l_shape': shapes['l_shape'],
+        'hollow_sphere': shapes['hollow_sphere'],
+    }
+
+    # Test each non-convex shape with each non-convex structuring element
+    for shape_name, shape in nonconvex_shapes.items():
+        for elem_name, element in nc_elements.items():
+            # Test Minkowski sum (dilation)
+            print(f"  Starting {shape_name} + {elem_name} (sum)...", end=" ", flush=True)
+            result, manifold = test_nonconvex_minkowski(
+                shape, shape_name, element, elem_name, is_sum=True)
+            status = "ERROR" if result.error else ("EMPTY" if result.is_empty else "OK")
+            print(f"{result.time_ms:.1f}ms, {result.num_tris} tris, {status}", flush=True)
+
+            # Save STL
+            stl_filename = f"{shape_name}_x_{elem_name}_sum.stl"
+            if manifold is not None and not result.is_empty and not result.error:
+                try:
+                    save_stl(manifold, str(stl_dir / stl_filename))
+                    result.stl_file = stl_filename
+                except Exception as e:
+                    print(f"    Warning: Could not save result: {e}")
+            all_results.append(result)
+
+            # Test Minkowski difference (erosion)
+            print(f"  Starting {shape_name} - {elem_name} (diff)...", end=" ", flush=True)
+            result, manifold = test_nonconvex_minkowski(
+                shape, shape_name, element, elem_name, is_sum=False)
+            status = "ERROR" if result.error else ("EMPTY" if result.is_empty else "OK")
+            print(f"{result.time_ms:.1f}ms, {result.num_tris} tris, {status}", flush=True)
+
+            # Save STL
+            stl_filename = f"{shape_name}_x_{elem_name}_diff.stl"
+            if manifold is not None and not result.is_empty and not result.error:
+                try:
+                    save_stl(manifold, str(stl_dir / stl_filename))
+                    result.stl_file = stl_filename
+                except Exception as e:
+                    print(f"    Warning: Could not save result: {e}")
+            all_results.append(result)
 
     # Print summary table
     print_results_table(all_results)

@@ -747,12 +747,12 @@ def run_tests(output_dir: str, deltas: List[float] = None,
         save_stl(elem, str(stl_dir / f"{elem_name}_original.stl"))
 
     # Select non-convex shapes for testing
-    # Note: spoon is excluded because it has 904 triangles, making NC-NC Minkowski
-    # operations prohibitively slow (904 * element_tris hull operations)
+    # Note: hollow_sphere works with sequential batch processing but is slow.
+    # Spoon (904 tris) is excluded as it creates 47k+ face pairs and crashes.
     nonconvex_shapes = {
         'fun_shape': shapes['fun_shape'],
         'l_shape': shapes['l_shape'],
-        # 'hollow_sphere': shapes['hollow_sphere'],  # Also slow due to high tri count
+        'hollow_sphere': shapes['hollow_sphere'],
     }
 
     # Test each non-convex shape with each non-convex structuring element

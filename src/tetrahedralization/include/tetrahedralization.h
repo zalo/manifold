@@ -20,6 +20,9 @@
 
 namespace manifold {
 
+// Forward declaration
+class Manifold;
+
 /**
  * @ingroup Connections
  *
@@ -75,5 +78,22 @@ class Manifold;
 TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
                                               float minQuality = 0.0f,
                                               int maxIterations = 10);
+
+/**
+ * @ingroup Core
+ *
+ * Same as ConstrainedDelaunayTetrahedralization, but also returns the union
+ * of all inside tetrahedra as a single manifold.
+ *
+ * @param manifold The input manifold mesh to tetrahedralize
+ * @param tetUnionOut Output parameter for the union of all inside tetrahedra
+ * @param minQuality Minimum tetrahedron quality threshold (0.0 to 1.0)
+ * @param maxIterations Reserved for future iterative refinement. Currently unused.
+ * @return TetMesh containing vertices and tetrahedra indices for the interior
+ *         tetrahedralization of the manifold.
+ */
+TetMesh ConstrainedDelaunayTetrahedralizationWithUnion(
+    const Manifold& manifold, Manifold& tetUnionOut, float minQuality = 0.0f,
+    int maxIterations = 10);
 
 }  // namespace manifold

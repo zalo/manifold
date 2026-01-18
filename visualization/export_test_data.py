@@ -17,6 +17,35 @@ def load_manifold3d():
     return manifold3d
 
 
+def compute_tet_union_python(m3d, tet_mesh):
+    """Compute union of tetrahedra in Python using Compose.
+
+    This is a workaround for C++ Compose stability issues with many manifolds.
+    """
+    verts = np.array(tet_mesh.vert_pos)
+    tets = np.array(tet_mesh.tet_verts)
+
+    if len(tets) == 0:
+        return m3d.Manifold()
+
+    # Create manifolds in chunks
+    chunk_size = 100
+    chunks = []
+    for start in range(0, len(tets), chunk_size):
+        end = min(start + chunk_size, len(tets))
+        manifolds = []
+        for tet in tets[start:end]:
+            pts = [tuple(verts[j]) for j in tet]
+            tet_manifold = m3d.Manifold.hull_points(pts)
+            manifolds.append(tet_manifold)
+        chunks.append(m3d.Manifold.compose(manifolds))
+
+    # Compose chunks
+    if len(chunks) == 1:
+        return chunks[0]
+    return m3d.Manifold.compose(chunks)
+
+
 def compute_tet_quality(v0, v1, v2, v3):
     """Compute tetrahedron quality metric (0-1)."""
     d0 = v1 - v0
@@ -40,7 +69,7 @@ def compute_tet_quality(v0, v1, v2, v3):
     return float(np.clip(s * vol / (rms ** 3), 0, 1))
 
 
-def tet_mesh_to_dict(tet_mesh, name, description, surface_mesh=None):
+def tet_mesh_to_dict(tet_mesh, name, description, surface_mesh=None, tet_union=None):
     """Convert TetMesh to JSON-serializable dict."""
     vertices = tet_mesh.vert_pos.tolist()
     tetrahedra = tet_mesh.tet_verts.tolist()
@@ -77,21 +106,40 @@ def tet_mesh_to_dict(tet_mesh, name, description, surface_mesh=None):
             "triangles": mesh.tri_verts.tolist()
         }
 
+    # Add tetrahedra union mesh if provided
+    if tet_union is not None and not tet_union.is_empty():
+        mesh = tet_union.to_mesh()
+        result["tetUnion"] = {
+            "vertices": mesh.vert_properties[:, :3].tolist(),
+            "triangles": mesh.tri_verts.tolist()
+        }
+
     return result
+
+
+def tetrahedralize_with_union(m3d, manifold):
+    """Tetrahedralize a manifold and compute tet union in Python.
+
+    Uses constrained_delaunay_tetrahedralization and computes union in Python
+    to avoid C++ Compose stability issues.
+    """
+    tet_mesh = m3d.constrained_delaunay_tetrahedralization(manifold)
+    tet_union = compute_tet_union_python(m3d, tet_mesh)
+    return tet_mesh, tet_union
 
 
 def generate_test_cases(m3d):
     """Generate all test cases and return as list of dicts."""
     test_cases = []
 
-    # 1. Cube (do constrained first to avoid state issues)
+    # 1. Cube
     print("Generating: Cube...")
     cube = m3d.Manifold.cube((2, 2, 2), center=True)
     t0 = time()
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(cube)
+    tet_mesh, tet_union = tetrahedralize_with_union(m3d, cube)
     elapsed = time() - t0
     test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "Cube", f"Unit cube, constrained ({elapsed*1000:.1f}ms)", cube),
+        **tet_mesh_to_dict(tet_mesh, "Cube", f"Unit cube, constrained ({elapsed*1000:.1f}ms)", cube, tet_union),
         "type": "constrained"
     })
 
@@ -99,10 +147,10 @@ def generate_test_cases(m3d):
     print("Generating: Sphere...")
     sphere = m3d.Manifold.sphere(1.0, 16)
     t0 = time()
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(sphere)
+    tet_mesh, tet_union = tetrahedralize_with_union(m3d, sphere)
     elapsed = time() - t0
     test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "Sphere", f"Geodesic sphere (16 segments), constrained ({elapsed*1000:.1f}ms)", sphere),
+        **tet_mesh_to_dict(tet_mesh, "Sphere", f"Geodesic sphere (16 segments), constrained ({elapsed*1000:.1f}ms)", sphere, tet_union),
         "type": "constrained"
     })
 
@@ -110,10 +158,10 @@ def generate_test_cases(m3d):
     print("Generating: Cylinder...")
     cylinder = m3d.Manifold.cylinder(2.0, 0.5, circular_segments=16)
     t0 = time()
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(cylinder)
+    tet_mesh, tet_union = tetrahedralize_with_union(m3d, cylinder)
     elapsed = time() - t0
     test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "Cylinder", f"Cylinder (height=2, radius=0.5), constrained ({elapsed*1000:.1f}ms)", cylinder),
+        **tet_mesh_to_dict(tet_mesh, "Cylinder", f"Cylinder (height=2, radius=0.5), constrained ({elapsed*1000:.1f}ms)", cylinder, tet_union),
         "type": "constrained"
     })
 
@@ -124,10 +172,10 @@ def generate_test_cases(m3d):
     circle = circle.translate((1.0, 0.0))
     torus = circle.revolve(circular_segments=16)
     t0 = time()
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(torus)
+    tet_mesh, tet_union = tetrahedralize_with_union(m3d, torus)
     elapsed = time() - t0
     test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "Torus", f"Torus (major=1.0, minor=0.3), constrained ({elapsed*1000:.1f}ms)", torus),
+        **tet_mesh_to_dict(tet_mesh, "Torus", f"Torus (major=1.0, minor=0.3), constrained ({elapsed*1000:.1f}ms)", torus, tet_union),
         "type": "constrained"
     })
 
@@ -137,10 +185,10 @@ def generate_test_cases(m3d):
     sphere = m3d.Manifold.sphere(1.3, 16)
     bool_result = cube - sphere
     t0 = time()
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(bool_result)
+    tet_mesh, tet_union = tetrahedralize_with_union(m3d, bool_result)
     elapsed = time() - t0
     test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "Boolean Difference", f"Cube minus sphere, constrained ({elapsed*1000:.1f}ms)", bool_result),
+        **tet_mesh_to_dict(tet_mesh, "Boolean Difference", f"Cube minus sphere, constrained ({elapsed*1000:.1f}ms)", bool_result, tet_union),
         "type": "constrained"
     })
 
@@ -151,10 +199,10 @@ def generate_test_cases(m3d):
     l_shape = square1 + square2
     extruded = l_shape.extrude(1.5)
     t0 = time()
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(extruded)
+    tet_mesh, tet_union = tetrahedralize_with_union(m3d, extruded)
     elapsed = time() - t0
     test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "Extruded L-Shape", f"L-shaped extrusion, constrained ({elapsed*1000:.1f}ms)", extruded),
+        **tet_mesh_to_dict(tet_mesh, "Extruded L-Shape", f"L-shaped extrusion, constrained ({elapsed*1000:.1f}ms)", extruded, tet_union),
         "type": "constrained"
     })
 
@@ -166,10 +214,10 @@ def generate_test_cases(m3d):
     hole_z = m3d.Manifold.cylinder(4, 0.3, circular_segments=8).translate((0, 0, -2))
     high_genus = cube - hole_x - hole_y - hole_z
     t0 = time()
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(high_genus)
+    tet_mesh, tet_union = tetrahedralize_with_union(m3d, high_genus)
     elapsed = time() - t0
     test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "High-Genus Shape", f"Cube with 3 cylindrical holes (genus={high_genus.genus()}), constrained ({elapsed*1000:.1f}ms)", high_genus),
+        **tet_mesh_to_dict(tet_mesh, "High-Genus Shape", f"Cube with 3 cylindrical holes (genus={high_genus.genus()}), constrained ({elapsed*1000:.1f}ms)", high_genus, tet_union),
         "type": "constrained"
     })
 
@@ -177,10 +225,10 @@ def generate_test_cases(m3d):
     print("Generating: Tetrahedron...")
     tetrahedron = m3d.Manifold.tetrahedron()
     t0 = time()
-    tet_mesh = m3d.constrained_delaunay_tetrahedralization(tetrahedron)
+    tet_mesh, tet_union = tetrahedralize_with_union(m3d, tetrahedron)
     elapsed = time() - t0
     test_cases.append({
-        **tet_mesh_to_dict(tet_mesh, "Tetrahedron", f"Single tetrahedron, constrained ({elapsed*1000:.1f}ms)", tetrahedron),
+        **tet_mesh_to_dict(tet_mesh, "Tetrahedron", f"Single tetrahedron, constrained ({elapsed*1000:.1f}ms)", tetrahedron, tet_union),
         "type": "constrained"
     })
 

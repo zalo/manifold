@@ -1033,4 +1033,24 @@ NB_MODULE(manifold3d, m) {
       "Default is 10.\n"
       ":return: TetMesh containing vertices and tetrahedra indices for the "
       "interior tetrahedralization of the manifold.");
+
+  m.def(
+      "constrained_delaunay_tetrahedralization_with_union",
+      [](Manifold &manifold, float minQuality, int maxIterations) {
+        Manifold tetUnion;
+        TetMesh result = ConstrainedDelaunayTetrahedralizationWithUnion(
+            manifold, tetUnion, minQuality, maxIterations);
+        return std::make_tuple(std::move(result), std::move(tetUnion));
+      },
+      nb::arg("manifold"), nb::arg("min_quality") = 0.0f,
+      nb::arg("max_iterations") = 10,
+      "Performs constrained Delaunay tetrahedralization on a manifold mesh.\n"
+      "Same as constrained_delaunay_tetrahedralization, but also returns "
+      "the union of all inside tetrahedra as a single manifold.\n\n"
+      ":param manifold: The input manifold mesh to tetrahedralize.\n"
+      ":param min_quality: Minimum tetrahedron quality threshold (0.0 to 1.0).\n"
+      ":param max_iterations: Maximum number of refinement iterations. "
+      "Default is 10.\n"
+      ":return: Tuple of (TetMesh, Manifold) where the Manifold is the union "
+      "of all inside tetrahedra.");
 }

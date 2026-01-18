@@ -410,6 +410,10 @@
                     Show Tetrahedra
                 </label>
                 <label>
+                    <input type="checkbox" id="show-tet-union">
+                    Show Tet Union
+                </label>
+                <label>
                     Tet Scale:
                     <input type="range" id="tet-scale" min="0.3" max="1.0" step="0.05" value="0.75">
                 </label>
@@ -439,7 +443,7 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         let scene, camera, renderer, controls;
-        let tetMesh, surfaceMesh;
+        let tetMesh, surfaceMesh, tetUnionMesh;
         let testData = null;
         let currentTestIndex = 0;
 
@@ -515,6 +519,10 @@
                 if (tetMesh) tetMesh.visible = e.target.checked;
             });
 
+            document.getElementById('show-tet-union').addEventListener('change', (e) => {
+                if (tetUnionMesh) tetUnionMesh.visible = e.target.checked;
+            });
+
             document.getElementById('tet-scale').addEventListener('input', (e) => {
                 if (testData) {
                     loadTestCase(currentTestIndex);
@@ -524,6 +532,9 @@
             document.getElementById('wireframe').addEventListener('change', (e) => {
                 if (tetMesh) {
                     tetMesh.material.wireframe = e.target.checked;
+                }
+                if (tetUnionMesh) {
+                    tetUnionMesh.material.wireframe = e.target.checked;
                 }
             });
 
@@ -648,6 +659,30 @@
             return new THREE.Mesh(geometry, material);
         }
 
+        function createTetUnionMesh(vertices, triangles) {
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+
+            for (const tri of triangles) {
+                for (const idx of tri) {
+                    positions.push(...vertices[idx]);
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshPhongMaterial({
+                color: 0xff6b6b,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.7,
+                wireframe: document.getElementById('wireframe').checked
+            });
+
+            return new THREE.Mesh(geometry, material);
+        }
+
         function loadTestCase(index) {
             const tc = testData.testCases[index];
             currentTestIndex = index;
@@ -663,6 +698,12 @@
                 surfaceMesh.geometry.dispose();
                 surfaceMesh.material.dispose();
             }
+            if (tetUnionMesh) {
+                scene.remove(tetUnionMesh);
+                tetUnionMesh.geometry.dispose();
+                tetUnionMesh.material.dispose();
+                tetUnionMesh = null;
+            }
 
             const scale = parseFloat(document.getElementById('tet-scale').value);
 
@@ -676,6 +717,13 @@
                 surfaceMesh = createSurfaceMesh(tc.surface.vertices, tc.surface.triangles);
                 surfaceMesh.visible = document.getElementById('show-surface').checked;
                 scene.add(surfaceMesh);
+            }
+
+            // Create tet union mesh if available
+            if (tc.tetUnion) {
+                tetUnionMesh = createTetUnionMesh(tc.tetUnion.vertices, tc.tetUnion.triangles);
+                tetUnionMesh.visible = document.getElementById('show-tet-union').checked;
+                scene.add(tetUnionMesh);
             }
 
             // Center camera on mesh

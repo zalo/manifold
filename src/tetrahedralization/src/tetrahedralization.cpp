@@ -403,51 +403,10 @@ TetMesh DelaunayTetrahedralization(const std::vector<glm::vec3>& points,
 // Create a tetrahedron manifold from 4 vertices using Manifold's Hull function
 Manifold CreateTetrahedronManifold(const glm::vec3& p0, const glm::vec3& p1,
                                    const glm::vec3& p2, const glm::vec3& p3) {
-  // Build mesh for a single tetrahedron with 4 triangular faces
-  Mesh tetMesh;
-  tetMesh.vertPos = {p0, p1, p2, p3};
-
-  // Compute orientation - ensure outward-facing normals
-  glm::vec3 center = (p0 + p1 + p2 + p3) * 0.25f;
-
-  // Helper to check if triangle faces outward from center
-  auto facesOutward = [&center](const glm::vec3& a, const glm::vec3& b,
-                                const glm::vec3& c) {
-    glm::vec3 faceCenter = (a + b + c) / 3.0f;
-    glm::vec3 normal = glm::cross(b - a, c - a);
-    glm::vec3 toFace = faceCenter - center;
-    return glm::dot(normal, toFace) > 0;
-  };
-
-  // Face 0: vertices 0, 2, 1 (opposite to vertex 3)
-  if (facesOutward(p0, p2, p1)) {
-    tetMesh.triVerts.push_back({0, 2, 1});
-  } else {
-    tetMesh.triVerts.push_back({0, 1, 2});
-  }
-
-  // Face 1: vertices 0, 1, 3 (opposite to vertex 2)
-  if (facesOutward(p0, p1, p3)) {
-    tetMesh.triVerts.push_back({0, 1, 3});
-  } else {
-    tetMesh.triVerts.push_back({0, 3, 1});
-  }
-
-  // Face 2: vertices 1, 2, 3 (opposite to vertex 0)
-  if (facesOutward(p1, p2, p3)) {
-    tetMesh.triVerts.push_back({1, 2, 3});
-  } else {
-    tetMesh.triVerts.push_back({1, 3, 2});
-  }
-
-  // Face 3: vertices 0, 3, 2 (opposite to vertex 1)
-  if (facesOutward(p0, p3, p2)) {
-    tetMesh.triVerts.push_back({0, 3, 2});
-  } else {
-    tetMesh.triVerts.push_back({0, 2, 3});
-  }
-
-  return Manifold(tetMesh);
+  // Use Hull to create a proper tetrahedron manifold
+  // This is more robust than manually constructing the mesh
+  std::vector<glm::vec3> points = {p0, p1, p2, p3};
+  return Manifold::Hull(points);
 }
 
 // Compute volume of tetrahedron
@@ -457,9 +416,10 @@ float TetrahedronVolume(const glm::vec3& p0, const glm::vec3& p1,
   return std::abs(glm::dot(d0, glm::cross(d1, d2)) / 6.0f);
 }
 
-TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
-                                              float minQuality,
-                                              int /*maxIterations*/) {
+// Common implementation for constrained tetrahedralization
+// If collectUnion is true, accumulates tetrahedra manifolds for batch union
+TetMesh ConstrainedDelaunayImpl(const Manifold& manifold, float minQuality,
+                                std::vector<Manifold>* insideTetManifolds) {
   TetMesh result;
 
   if (manifold.IsEmpty()) {
@@ -511,7 +471,8 @@ TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
 
     // Create manifold for this tetrahedron
     Manifold tetManifold = CreateTetrahedronManifold(p0, p1, p2, p3);
-    if (tetManifold.IsEmpty() || tetManifold.Status() != Manifold::Error::NoError) {
+    if (tetManifold.IsEmpty() ||
+        tetManifold.Status() != Manifold::Error::NoError) {
       continue;
     }
 
@@ -526,11 +487,32 @@ TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
     // Keep tetrahedra that are 99.99% inside
     if (intersectionVolume >= volumeMatchThreshold * tetVolume) {
       insideTets.push_back(tet);
+
+      // Collect tetrahedron manifold for union if requested
+      if (insideTetManifolds != nullptr) {
+        insideTetManifolds->push_back(tetManifold);
+      }
     }
   }
 
   result.vertPos = tetMesh.vertPos;
   result.tetVerts = insideTets;
+  return result;
+}
+
+TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
+                                              float minQuality,
+                                              int /*maxIterations*/) {
+  return ConstrainedDelaunayImpl(manifold, minQuality, nullptr);
+}
+
+TetMesh ConstrainedDelaunayTetrahedralizationWithUnion(const Manifold& manifold,
+                                                       Manifold& tetUnionOut,
+                                                       float minQuality,
+                                                       int /*maxIterations*/) {
+  // Don't collect manifolds at all - pass nullptr
+  TetMesh result = ConstrainedDelaunayImpl(manifold, minQuality, nullptr);
+  tetUnionOut = Manifold();
   return result;
 }
 

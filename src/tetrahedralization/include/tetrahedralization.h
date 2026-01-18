@@ -14,8 +14,6 @@
 
 #pragma once
 
-#include <array>
-#include <cstdint>
 #include <vector>
 
 #include "public.h"
@@ -34,7 +32,7 @@ struct TetMesh {
   /// The vertex indices of the four tetrahedron corners, for each tetrahedron.
   /// Ordering follows positive orientation (first three vertices form a face
   /// with outward normal pointing away from fourth vertex)
-  std::vector<std::array<uint32_t, 4>> tetVerts;
+  std::vector<glm::ivec4> tetVerts;
 
   /// Number of tetrahedra
   size_t NumTet() const { return tetVerts.size(); }
@@ -62,18 +60,15 @@ class Manifold;
  * @ingroup Core
  *
  * Performs constrained Delaunay tetrahedralization on a manifold mesh.
- * Uses an intersection-based approach to trim tetrahedra to the manifold
- * boundary:
+ * Uses an intersection-based approach to filter tetrahedra:
  * 1. Performs unconstrained Delaunay tetrahedralization of manifold vertices
  * 2. Intersects each tetrahedron with the original manifold
  * 3. Discards tetrahedra with empty intersection (fully outside)
- * 4. Keeps tetrahedra fully inside the manifold
- * 5. Accumulates partial intersections, unions them, and re-tetrahedralizes
- * 6. Repeats until convergence
+ * 4. Keeps tetrahedra that are at least 99.99% inside the manifold by volume
  *
  * @param manifold The input manifold mesh to tetrahedralize
  * @param minQuality Minimum tetrahedron quality threshold (0.0 to 1.0)
- * @param maxIterations Maximum number of refinement iterations. Default is 10.
+ * @param maxIterations Reserved for future iterative refinement. Currently unused.
  * @return TetMesh containing vertices and tetrahedra indices for the interior
  *         tetrahedralization of the manifold.
  */

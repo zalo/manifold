@@ -19,7 +19,6 @@
 #include <cstdlib>
 #include <limits>
 #include <set>
-#include <unordered_set>
 #include <vector>
 
 #include "manifold.h"
@@ -348,29 +347,6 @@ std::vector<uint32_t> CreateTetIds(std::vector<glm::vec3>& verts,
   return result;
 }
 
-// Hash function for triangle face (unordered vertex triple)
-struct TriangleHash {
-  size_t operator()(const std::array<uint32_t, 3>& tri) const {
-    // Sort vertices to make hash order-independent
-    uint32_t a = tri[0], b = tri[1], c = tri[2];
-    if (a > b) std::swap(a, b);
-    if (b > c) std::swap(b, c);
-    if (a > b) std::swap(a, b);
-    return std::hash<uint64_t>{}(
-        (static_cast<uint64_t>(a) << 42) | (static_cast<uint64_t>(b) << 21) | c);
-  }
-};
-
-struct TriangleEqual {
-  bool operator()(const std::array<uint32_t, 3>& a,
-                  const std::array<uint32_t, 3>& b) const {
-    std::array<uint32_t, 3> sa = a, sb = b;
-    std::sort(sa.begin(), sa.end());
-    std::sort(sb.begin(), sb.end());
-    return sa == sb;
-  }
-};
-
 }  // namespace
 
 TetMesh DelaunayTetrahedralization(const std::vector<glm::vec3>& points,
@@ -417,14 +393,14 @@ TetMesh DelaunayTetrahedralization(const std::vector<glm::vec3>& points,
   int numTets = static_cast<int>(tetIndices.size()) / 4;
   result.tetVerts.reserve(numTets);
   for (int i = 0; i < numTets; i++) {
-    result.tetVerts.push_back({tetIndices[4 * i], tetIndices[4 * i + 1],
-                               tetIndices[4 * i + 2], tetIndices[4 * i + 3]});
+    result.tetVerts.push_back(glm::ivec4(tetIndices[4 * i], tetIndices[4 * i + 1],
+                                         tetIndices[4 * i + 2], tetIndices[4 * i + 3]));
   }
 
   return result;
 }
 
-// Create a tetrahedron manifold from 4 vertices
+// Create a tetrahedron manifold from 4 vertices using Manifold's Hull function
 Manifold CreateTetrahedronManifold(const glm::vec3& p0, const glm::vec3& p1,
                                    const glm::vec3& p2, const glm::vec3& p3) {
   // Build mesh for a single tetrahedron with 4 triangular faces
@@ -474,7 +450,7 @@ Manifold CreateTetrahedronManifold(const glm::vec3& p0, const glm::vec3& p1,
   return Manifold(tetMesh);
 }
 
-// Compute signed volume of tetrahedron
+// Compute volume of tetrahedron
 float TetrahedronVolume(const glm::vec3& p0, const glm::vec3& p1,
                         const glm::vec3& p2, const glm::vec3& p3) {
   glm::vec3 d0 = p1 - p0, d1 = p2 - p0, d2 = p3 - p0;
@@ -497,6 +473,7 @@ TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
   }
 
   const float volumeTolerance = 1e-6f;
+  const float volumeMatchThreshold = 0.9999f;  // 99.99% volume match
 
   // Reset random seed for reproducibility
   srand(12345);
@@ -509,9 +486,19 @@ TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
   }
 
   // Filter tetrahedra to keep only those inside the manifold
-  std::vector<std::array<uint32_t, 4>> insideTets;
+  std::vector<glm::ivec4> insideTets;
 
-  for (const auto& tet : tetMesh.tetVerts) {
+  for (size_t i = 0; i < tetMesh.tetVerts.size(); i++) {
+    const glm::ivec4& tet = tetMesh.tetVerts[i];
+
+    // Bounds check
+    if (tet[0] < 0 || tet[0] >= static_cast<int>(tetMesh.vertPos.size()) ||
+        tet[1] < 0 || tet[1] >= static_cast<int>(tetMesh.vertPos.size()) ||
+        tet[2] < 0 || tet[2] >= static_cast<int>(tetMesh.vertPos.size()) ||
+        tet[3] < 0 || tet[3] >= static_cast<int>(tetMesh.vertPos.size())) {
+      continue;
+    }
+
     const glm::vec3& p0 = tetMesh.vertPos[tet[0]];
     const glm::vec3& p1 = tetMesh.vertPos[tet[1]];
     const glm::vec3& p2 = tetMesh.vertPos[tet[2]];
@@ -536,8 +523,8 @@ TetMesh ConstrainedDelaunayTetrahedralization(const Manifold& manifold,
 
     float intersectionVolume = intersection.GetProperties().volume;
 
-    // Keep tetrahedra that are mostly inside (>50% overlap)
-    if (intersectionVolume > 0.5f * tetVolume) {
+    // Keep tetrahedra that are 99.99% inside
+    if (intersectionVolume >= volumeMatchThreshold * tetVolume) {
       insideTets.push_back(tet);
     }
   }

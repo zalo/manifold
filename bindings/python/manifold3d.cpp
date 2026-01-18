@@ -981,8 +981,8 @@ NB_MODULE(manifold3d, m) {
       .def_prop_ro(
           "tet_verts",
           [](const TetMesh &self) {
-            return nb::ndarray<nb::numpy, const uint32_t, nb::c_contig>(
-                reinterpret_cast<const uint32_t *>(self.tetVerts.data()),
+            return nb::ndarray<nb::numpy, const int32_t, nb::c_contig>(
+                reinterpret_cast<const int32_t *>(self.tetVerts.data()),
                 {self.tetVerts.size(), 4});
           },
           nb::rv_policy::reference_internal,

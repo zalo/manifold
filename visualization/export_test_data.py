@@ -18,9 +18,12 @@ def load_manifold3d():
 
 
 def compute_tet_union_python(m3d, tet_mesh):
-    """Compute union of tetrahedra in Python using Compose.
+    """Compute union of tetrahedra in Python using batched Compose.
 
-    This is a workaround for C++ Compose stability issues with many manifolds.
+    Uses a batched approach to reduce peak memory usage:
+    1. Process tetrahedra in small batches
+    2. Compose each batch into a single manifold
+    3. Progressively merge batches to avoid holding all in memory
     """
     verts = np.array(tet_mesh.vert_pos)
     tets = np.array(tet_mesh.tet_verts)
@@ -28,22 +31,35 @@ def compute_tet_union_python(m3d, tet_mesh):
     if len(tets) == 0:
         return m3d.Manifold()
 
-    # Create manifolds in chunks
-    chunk_size = 100
-    chunks = []
-    for start in range(0, len(tets), chunk_size):
-        end = min(start + chunk_size, len(tets))
-        manifolds = []
+    # Process in batches to limit memory usage
+    batch_size = 50  # Small batch size for memory efficiency
+    merge_threshold = 4  # Merge when we have this many pending chunks
+
+    pending_chunks = []
+
+    for start in range(0, len(tets), batch_size):
+        end = min(start + batch_size, len(tets))
+
+        # Create manifolds for this batch
+        batch_manifolds = []
         for tet in tets[start:end]:
             pts = [tuple(verts[j]) for j in tet]
             tet_manifold = m3d.Manifold.hull_points(pts)
-            manifolds.append(tet_manifold)
-        chunks.append(m3d.Manifold.compose(manifolds))
+            batch_manifolds.append(tet_manifold)
 
-    # Compose chunks
-    if len(chunks) == 1:
-        return chunks[0]
-    return m3d.Manifold.compose(chunks)
+        # Compose the batch
+        batch_composed = m3d.Manifold.compose(batch_manifolds)
+        pending_chunks.append(batch_composed)
+
+        # Merge pending chunks when we hit threshold to free memory
+        if len(pending_chunks) >= merge_threshold:
+            merged = m3d.Manifold.compose(pending_chunks)
+            pending_chunks = [merged]
+
+    # Final merge of remaining chunks
+    if len(pending_chunks) == 1:
+        return pending_chunks[0]
+    return m3d.Manifold.compose(pending_chunks)
 
 
 def compute_tet_quality(v0, v1, v2, v3):

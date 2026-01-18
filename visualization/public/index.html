@@ -414,6 +414,10 @@
                     Show Tet Union
                 </label>
                 <label>
+                    <input type="checkbox" id="show-residual">
+                    Show Residual
+                </label>
+                <label>
                     Tet Scale:
                     <input type="range" id="tet-scale" min="0.3" max="1.0" step="0.05" value="0.75">
                 </label>
@@ -443,7 +447,7 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         let scene, camera, renderer, controls;
-        let tetMesh, surfaceMesh, tetUnionMesh;
+        let tetMesh, surfaceMesh, tetUnionMesh, residualMesh;
         let testData = null;
         let currentTestIndex = 0;
 
@@ -510,18 +514,24 @@
             renderer.setSize(container.clientWidth, container.clientHeight);
         }
 
+        function updateMeshVisibility() {
+            const showSurface = document.getElementById('show-surface').checked;
+            const showTets = document.getElementById('show-tets').checked;
+            const showTetUnion = document.getElementById('show-tet-union').checked;
+            const showResidual = document.getElementById('show-residual').checked;
+
+            // Surface is hidden when tet union or residual is visible
+            if (surfaceMesh) surfaceMesh.visible = showSurface && !showTetUnion && !showResidual;
+            if (tetMesh) tetMesh.visible = showTets;
+            if (tetUnionMesh) tetUnionMesh.visible = showTetUnion;
+            if (residualMesh) residualMesh.visible = showResidual;
+        }
+
         function setupControls() {
-            document.getElementById('show-surface').addEventListener('change', (e) => {
-                if (surfaceMesh) surfaceMesh.visible = e.target.checked;
-            });
-
-            document.getElementById('show-tets').addEventListener('change', (e) => {
-                if (tetMesh) tetMesh.visible = e.target.checked;
-            });
-
-            document.getElementById('show-tet-union').addEventListener('change', (e) => {
-                if (tetUnionMesh) tetUnionMesh.visible = e.target.checked;
-            });
+            document.getElementById('show-surface').addEventListener('change', updateMeshVisibility);
+            document.getElementById('show-tets').addEventListener('change', updateMeshVisibility);
+            document.getElementById('show-tet-union').addEventListener('change', updateMeshVisibility);
+            document.getElementById('show-residual').addEventListener('change', updateMeshVisibility);
 
             document.getElementById('tet-scale').addEventListener('input', (e) => {
                 if (testData) {
@@ -535,6 +545,9 @@
                 }
                 if (tetUnionMesh) {
                     tetUnionMesh.material.wireframe = e.target.checked;
+                }
+                if (residualMesh) {
+                    residualMesh.material.wireframe = e.target.checked;
                 }
             });
 
@@ -681,6 +694,28 @@
             return new THREE.Mesh(geometry, material);
         }
 
+        function createResidualMesh(vertices, triangles) {
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+
+            for (const tri of triangles) {
+                for (const idx of tri) {
+                    positions.push(...vertices[idx]);
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshPhongMaterial({
+                color: 0xffaa00,  // Orange for residual
+                side: THREE.DoubleSide,
+                wireframe: document.getElementById('wireframe').checked
+            });
+
+            return new THREE.Mesh(geometry, material);
+        }
+
         function loadTestCase(index) {
             const tc = testData.testCases[index];
             currentTestIndex = index;
@@ -702,27 +737,39 @@
                 tetUnionMesh.material.dispose();
                 tetUnionMesh = null;
             }
+            if (residualMesh) {
+                scene.remove(residualMesh);
+                residualMesh.geometry.dispose();
+                residualMesh.material.dispose();
+                residualMesh = null;
+            }
 
             const scale = parseFloat(document.getElementById('tet-scale').value);
 
             // Create tetrahedra mesh
             tetMesh = createTetrahedraMesh(tc.vertices, tc.tetrahedra, tc.qualities, scale);
-            tetMesh.visible = document.getElementById('show-tets').checked;
             scene.add(tetMesh);
 
             // Create surface mesh if available
             if (tc.surface) {
                 surfaceMesh = createSurfaceMesh(tc.surface.vertices, tc.surface.triangles);
-                surfaceMesh.visible = document.getElementById('show-surface').checked;
                 scene.add(surfaceMesh);
             }
 
             // Create tet union mesh if available
             if (tc.tetUnion) {
                 tetUnionMesh = createTetUnionMesh(tc.tetUnion.vertices, tc.tetUnion.triangles);
-                tetUnionMesh.visible = document.getElementById('show-tet-union').checked;
                 scene.add(tetUnionMesh);
             }
+
+            // Create residual mesh if available
+            if (tc.residual) {
+                residualMesh = createResidualMesh(tc.residual.vertices, tc.residual.triangles);
+                scene.add(residualMesh);
+            }
+
+            // Update visibility based on current checkbox states
+            updateMeshVisibility();
 
             // Center camera on mesh
             const box = new THREE.Box3().setFromObject(tetMesh);

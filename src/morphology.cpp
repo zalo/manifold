@@ -207,6 +207,99 @@ vec3 FacePrincipalDir(const vec3* pts, int nPts, vec3 centroid, vec3 faceNormal,
   return la::normalize((cu / len) * u + (cv / len) * v);
 }
 
+// Solve the n x n (row-major) system A x = b by Gaussian elimination with
+// partial pivoting; the solution is written back into b. Returns false if
+// singular. Used for the small (5x5/6x6) quadric-fit normal equations.
+inline bool SolveLinear(double* A, double* b, int n) {
+  for (int c = 0; c < n; ++c) {
+    int piv = c;
+    double best = std::fabs(A[c * n + c]);
+    for (int r = c + 1; r < n; ++r) {
+      const double v = std::fabs(A[r * n + c]);
+      if (v > best) {
+        best = v;
+        piv = r;
+      }
+    }
+    if (best < 1e-200) return false;
+    if (piv != c) {
+      for (int k = 0; k < n; ++k) std::swap(A[c * n + k], A[piv * n + k]);
+      std::swap(b[c], b[piv]);
+    }
+    for (int r = 0; r < n; ++r) {
+      if (r == c) continue;
+      const double f = A[r * n + c] / A[c * n + c];
+      for (int k = c; k < n; ++k) A[r * n + k] -= f * A[c * n + k];
+      b[r] -= f * b[c];
+    }
+  }
+  for (int i = 0; i < n; ++i) b[i] /= A[i * n + i];
+  return true;
+}
+
+// Per-vertex signed principal curvatures via local quadric fitting, following
+// the reference per_vertex_signed_prin_curvature: fit
+// z = a0 x + a1 y + a2 x^2 + a3 xy + a4 y^2 over the 1- and 2-ring in the
+// vertex tangent frame, build the shape operator S = I^-1 II from the first
+// and second fundamental forms, and take its eigenvalues. Returns the minimum
+// (wantMin) or maximum signed principal curvature per vertex, with convex
+// positive to match CalculateCurvature. This is far more stable than the
+// dihedral discrete curvature, which keeps the freeze threshold from being
+// spuriously crossed during the flow (avoiding creep into ball-reachable
+// regions like the interior of a wide pit).
+Vec<double> PerVertexPrinCurvature(VecView<const vec3> vertPos,
+                                   VecView<const vec3> vertNormal,
+                                   const Halfedges& halfedge, bool wantMin) {
+  const size_t nv = vertPos.size();
+  std::vector<std::vector<int>> nbr(nv);
+  for (size_t e = 0; e < halfedge.size(); ++e)
+    nbr[halfedge.Start(e)].push_back(halfedge.End(e));
+
+  Vec<double> out(nv, 0.0);
+  for_each(autoPolicy(nv, 256), countAt(0_uz), countAt(nv), [&](size_t i) {
+    std::unordered_set<int> ring;
+    for (const int j : nbr[i]) {
+      ring.insert(j);
+      for (const int k : nbr[j]) ring.insert(k);
+    }
+    ring.erase(static_cast<int>(i));
+    if (ring.size() < 5) return;  // too few points: leave flat (frozen)
+
+    const vec3 n = vertNormal[i];
+    const vec3 seed = std::fabs(n[0]) < 0.9 ? vec3(1, 0, 0) : vec3(0, 1, 0);
+    const vec3 u = la::normalize(seed - la::dot(seed, n) * n);
+    const vec3 v = la::cross(n, u);
+    const vec3 pi = vertPos[i];
+
+    double N[25] = {0}, rhs[5] = {0};
+    for (const int j : ring) {
+      const vec3 d = vertPos[j] - pi;
+      const double x = la::dot(d, u), y = la::dot(d, v), z = la::dot(d, n);
+      const double basis[5] = {x, y, x * x, x * y, y * y};
+      for (int a = 0; a < 5; ++a) {
+        rhs[a] += basis[a] * z;
+        for (int b = 0; b < 5; ++b) N[a * 5 + b] += basis[a] * basis[b];
+      }
+    }
+    if (!SolveLinear(N, rhs, 5)) return;
+    const double a0 = rhs[0], a1 = rhs[1], a2 = rhs[2], a3 = rhs[3], a4 = rhs[4];
+    const double L = std::sqrt(1 + a0 * a0 + a1 * a1);
+    const double E = 1 + a0 * a0, F = a0 * a1, G = 1 + a1 * a1;
+    const double e = 2 * a2 / L, f = a3 / L, g = 2 * a4 / L;
+    const double detI = E * G - F * F;
+    if (std::fabs(detI) < 1e-300) return;
+    // Shape operator S = I^-1 II, with I^-1 = [[G,-F],[-F,E]]/detI.
+    const double S00 = (G * e - F * f) / detI, S01 = (G * f - F * g) / detI;
+    const double S10 = (-F * e + E * f) / detI, S11 = (-F * f + E * g) / detI;
+    const double tr = S00 + S11, det = S00 * S11 - S01 * S10;
+    const double disc = std::sqrt(std::max(tr * tr - 4 * det, 0.0));
+    // Eigenvalues l1<=l2; negate for outward-normal sign (convex positive).
+    const double kMin = -0.5 * (tr + disc), kMax = -0.5 * (tr - disc);
+    out[i] = wantMin ? kMin : kMax;
+  });
+  return out;
+}
+
 // Uniform spatial-hash grid over a fixed set of anchor points (the original
 // concavity/convexity). Used to bound the region a morphological operation may
 // ever change to a fixed distance from those anchors, so the moving front
@@ -607,9 +700,20 @@ void Manifold::Impl::MorphologicalFlow(double radius, double edgeLength,
         false);
   }
 
-  // Characteristic length: drives the timestep and is scale-invariant.
-  double h = edgeLength;
-  if (h <= 0) {
+  // Work in a normalized frame (bounding box scaled to unit size) and use the
+  // reference implementation's fixed timestep coefficient (Q = M + 0.01*dt*L,
+  // with dt = 1). The semi-implicit step converges to the same shape
+  // regardless of the timestep, so this matches the source's setup without
+  // changing the converged result.
+  CalculateBBox();
+  const double scale =
+      std::max({bBox_.max[0] - bBox_.min[0], bBox_.max[1] - bBox_.min[1],
+                bBox_.max[2] - bBox_.min[2]});
+  if (scale <= 0) return;
+  for (size_t i = 0; i < NumVert(); ++i) vertPos_[i] /= scale;
+
+  double h = 0;  // mean edge length in the normalized frame
+  {
     double total = 0;
     size_t count = 0;
     for (size_t e = 0; e < halfedge_.size(); ++e) {
@@ -620,33 +724,9 @@ void Manifold::Impl::MorphologicalFlow(double radius, double edgeLength,
     }
     h = count > 0 ? total / count : 1.0;
   }
-  const double tau = h * h;
-  const double kBound = 1.0 / radius;
+  const double tau = 0.01;             // reference 0.01 * dt, dt = 1
+  const double kBound = scale / radius;  // 1 / (radius in the normalized frame)
   const double dispTol = 1e-4 * h;
-
-  // Pre-pass: anchor the changeable region to the original concavity (for
-  // closing) / convexity (for opening). A vertex may move only if it is both
-  // curvature-active AND within `capDist` of an anchor, so the moving front
-  // cannot creep ring-by-ring into distant flat regions.
-  const double capDist = radius + 4.0 * h;
-  AnchorGrid grid;
-  grid.cell = capDist;
-  {
-    SetNormalsAndCoplanar();
-    CalculateVertNormals();
-    const size_t nv = NumVert(), nt = NumTri();
-    Vec<double> H(nv, 0.0), K(nv, kTwoPi), area(nv, 0.0), degree(nv, 0.0);
-    for_each(autoPolicy(nt, 1e4), countAt(0_uz), countAt(nt),
-             RawCurvature{H, K, area, degree, halfedge_, vertPos_, faceNormal_});
-    for (size_t i = 0; i < nv; ++i) {
-      if (area[i] <= 0) continue;
-      const double factor = degree[i] / (6 * area[i]);
-      const double meanC = H[i] * factor, gaussC = K[i] * factor;
-      const double root = std::sqrt(std::max(meanC * meanC - 4 * gaussC, 0.0));
-      const double kMin = 0.5 * (meanC - root), kMax = 0.5 * (meanC + root);
-      if (close ? (kMin < -kBound) : (kMax > kBound)) grid.Insert(vertPos_[i]);
-    }
-  }
 
   for (int iter = 0; iter < maxIterations; ++iter) {
     const size_t numVert = NumVert();
@@ -654,33 +734,32 @@ void Manifold::Impl::MorphologicalFlow(double radius, double edgeLength,
     SetNormalsAndCoplanar();
     CalculateVertNormals();
 
-    // --- Per-vertex signed principal curvature and the frozen mask. ---
-    Vec<double> H(numVert, 0.0), K(numVert, kTwoPi), area(numVert, 0.0),
-        degree(numVert, 0.0);
     auto policy = autoPolicy(numTri, 1e4);
-    for_each(
-        policy, countAt(0_uz), countAt(numTri),
-        RawCurvature{H, K, area, degree, halfedge_, vertPos_, faceNormal_});
-
-    Vec<char> frozen(numVert, 1);
+    // Lumped mass matrix = barycentric vertex area.
     Vec<double> mass(numVert, 0.0);
+    for (size_t tri = 0; tri < numTri; ++tri) {
+      const double a = TriArea(vertPos_[halfedge_.Start(3 * tri)],
+                               vertPos_[halfedge_.Start(3 * tri + 1)],
+                               vertPos_[halfedge_.Start(3 * tri + 2)]) /
+                       3.0;
+      mass[halfedge_.Start(3 * tri)] += a;
+      mass[halfedge_.Start(3 * tri + 1)] += a;
+      mass[halfedge_.Start(3 * tri + 2)] += a;
+    }
+    for (size_t i = 0; i < numVert; ++i)
+      if (mass[i] <= 0) mass[i] = 1.0;
+
+    // Robust per-vertex principal curvature (quadric fit) drives the freeze
+    // obstacle, exactly as in the reference: a vertex moves only where a ball
+    // of radius r cannot fit (min curvature < -1/r for closing, max curvature
+    // > 1/r for opening). No spatial cap -- the curvature freeze alone bounds
+    // the moving region.
+    const Vec<double> kCurv =
+        PerVertexPrinCurvature(vertPos_, vertNormal_, halfedge_, close);
+    Vec<char> frozen(numVert, 1);
     size_t activeCount = 0;
     for (size_t i = 0; i < numVert; ++i) {
-      const double m = area[i];
-      mass[i] = m > 0 ? m : 1.0;
-      if (m <= 0) continue;
-      // Same valence-correcting normalization as Impl::CalculateCurvature:
-      // meanC = k1 + k2 (sum), gaussC = k1 * k2 (product).
-      const double factor = degree[i] / (6 * m);
-      const double meanC = H[i] * factor;
-      const double gaussC = K[i] * factor;
-      const double root = std::sqrt(std::max(meanC * meanC - 4 * gaussC, 0.0));
-      const double kMin = 0.5 * (meanC - root);
-      const double kMax = 0.5 * (meanC + root);
-      // Active (moving) vertices are the ones a ball of radius r cannot reach,
-      // bounded to the neighborhood of the original concavity/convexity.
-      const bool active = (close ? (kMin < -kBound) : (kMax > kBound)) &&
-                          grid.Near(vertPos_[i], capDist);
+      const bool active = close ? (kCurv[i] < -kBound) : (kCurv[i] > kBound);
       if (active) {
         frozen[i] = 0;
         ++activeCount;
@@ -805,6 +884,9 @@ void Manifold::Impl::MorphologicalFlow(double radius, double edgeLength,
 
     if (maxDisp < dispTol) break;
   }
+
+  // Restore the original scale.
+  for (size_t i = 0; i < NumVert(); ++i) vertPos_[i] *= scale;
 
   // Re-validate geometry exactly as the eager refine / constructor paths do.
   CalculateBBox();

@@ -773,6 +773,60 @@ Manifold Manifold::SmoothOut(double minSharpAngle, double minSmoothness) const {
 }
 
 /**
+ * Surface-only morphological closing by a ball of the given radius. Fills
+ * concavities the ball cannot enter while leaving ball-reachable regions
+ * bit-for-bit unchanged; the result always contains the input. Implemented as
+ * a curvature-bounded curvature flow (Sellán et al., "Opening and Closing
+ * Surfaces", SIGGRAPH Asia 2020).
+ *
+ * @param radius The structuring-element ball radius. Larger radii fill larger
+ * concavities; as radius grows the result approaches the convex hull.
+ * @param edgeLength Target edge length for an optional uniform pre-refine of
+ * the input (0 keeps the input tessellation).
+ * @param maxIterations Cap on the number of semi-implicit flow steps.
+ * @param anisotropic If true (default) uses the faithful minimum-curvature
+ * flow; if false uses the faster but slightly less exact isotropic
+ * mean-curvature flow.
+ */
+Manifold Manifold::MorphologicalClose(double radius, double edgeLength,
+                                      int maxIterations,
+                                      bool anisotropic) const {
+  auto leafImpl = GetCsgLeafNode().GetImpl();
+  if (leafImpl->status_ != Error::NoError)
+    return PropagateStatus(leafImpl->status_);
+  auto pImpl = std::make_shared<Impl>(*leafImpl);
+  if (!IsEmpty())
+    pImpl->MorphologicalFlow(radius, edgeLength, maxIterations, anisotropic,
+                             /*close=*/true);
+  return Manifold(std::make_shared<CsgLeafNode>(pImpl));
+}
+
+/**
+ * Surface-only morphological opening by a ball of the given radius. Shaves
+ * convex features the ball cannot reach from outside while leaving
+ * ball-reachable regions bit-for-bit unchanged; the result is always contained
+ * in the input. This is the exact dual of MorphologicalClose.
+ *
+ * @param radius The structuring-element ball radius.
+ * @param edgeLength Target edge length for an optional uniform pre-refine of
+ * the input (0 keeps the input tessellation).
+ * @param maxIterations Cap on the number of semi-implicit flow steps.
+ * @param anisotropic If true (default) uses the faithful maximum-curvature
+ * flow; if false uses the faster isotropic mean-curvature flow.
+ */
+Manifold Manifold::MorphologicalOpen(double radius, double edgeLength,
+                                     int maxIterations, bool anisotropic) const {
+  auto leafImpl = GetCsgLeafNode().GetImpl();
+  if (leafImpl->status_ != Error::NoError)
+    return PropagateStatus(leafImpl->status_);
+  auto pImpl = std::make_shared<Impl>(*leafImpl);
+  if (!IsEmpty())
+    pImpl->MorphologicalFlow(radius, edgeLength, maxIterations, anisotropic,
+                             /*close=*/false);
+  return Manifold(std::make_shared<CsgLeafNode>(pImpl));
+}
+
+/**
  * Increase the density of the mesh by splitting every edge into n pieces. For
  * instance, with n = 2, each triangle will be split into 4 triangles. Quads
  * will ignore their interior triangle bisector. These will all be coplanar (and

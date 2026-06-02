@@ -266,6 +266,20 @@ class Manifold {
                          const std::vector<Smoothness>& sharpenedEdges = {});
   ///@}
 
+  /** @name Morphology
+   * Surface-only mathematical morphology by a ball-shaped structuring element,
+   * implemented as a curvature-bounded curvature flow (Sellán et al. 2020).
+   * Regions a ball of the given radius can already reach are left unchanged.
+   */
+  ///@{
+  Manifold MorphologicalClose(double radius, double edgeLength = 0,
+                              int maxIterations = 100,
+                              bool anisotropic = true) const;
+  Manifold MorphologicalOpen(double radius, double edgeLength = 0,
+                             int maxIterations = 100,
+                             bool anisotropic = true) const;
+  ///@}
+
   /** @name Convex Hull
    */
   ///@{

@@ -38,6 +38,7 @@ set(
   impl.cpp
   manifold.cpp
   minkowski.cpp
+  morphology.cpp
   polygon.cpp
   properties.cpp
   quickhull.cpp

@@ -243,6 +243,10 @@ struct Manifold::Impl {
   void Refine(std::function<int(vec3, vec4, vec4)>, bool = false,
               ExecutionContext::Impl* ctx = nullptr);
 
+  // morphology.cpp
+  void MorphologicalFlow(double radius, double edgeLength, int maxIterations,
+                         bool anisotropic, bool close);
+
   // quickhull.cpp
   void Hull(VecView<const vec3> vertPos, ExecutionContext::Impl* ctx = nullptr);
 

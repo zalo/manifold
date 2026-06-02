@@ -30,6 +30,7 @@ set(
   boolean_test.cpp
   sdf_test.cpp
   smooth_test.cpp
+  morphology_test.cpp
   hull_test.cpp
   samples_test.cpp
   boolean_complex_test.cpp
